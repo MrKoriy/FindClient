@@ -253,7 +253,7 @@ class TestSearchPagination:
             }
         )
 
-        session.get = AsyncMock(
+        session.get = MagicMock(
             side_effect=[
                 _async_context(page1_resp),
                 _async_context(page2_resp),
@@ -291,7 +291,7 @@ class TestSearchPagination:
             }
         )
 
-        session.get = AsyncMock(
+        session.get = MagicMock(
             side_effect=[
                 _async_context(page1_resp),
                 _async_context(page2_resp),
@@ -317,7 +317,7 @@ class TestSearchPagination:
             }
         )
 
-        session.get = AsyncMock(return_value=_async_context(resp))
+        session.get = MagicMock(return_value=_async_context(resp))
 
         orgs = await client.search("test", count=3)
         assert len(orgs) == 3
