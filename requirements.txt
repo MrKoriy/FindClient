@@ -3,5 +3,8 @@ aiohttp
 aiosqlite
 Brotli
 python-dotenv
+openpyxl
+curl_cffi
+telethon
 pytest
 pytest-asyncio

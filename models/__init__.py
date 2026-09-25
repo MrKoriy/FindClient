@@ -1,5 +1,7 @@
-"""Data models for the 2GIS Lead Scraper."""
+"""Data models for the lead-generation bot."""
 
+from models.order import Order
 from models.organization import Organization
+from models.tg_lead import TgLead
 
-__all__ = ["Organization"]
+__all__ = ["Order", "Organization", "TgLead"]
