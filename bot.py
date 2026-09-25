@@ -9,7 +9,9 @@ load_dotenv()
 from aiogram import Bot, Dispatcher
 
 from config import Settings
+from db.database import Database
 from handlers import register_routers
+from services.scrape_service import ScrapeService
 
 settings = Settings.from_env()
 
@@ -21,10 +23,20 @@ register_routers(dp)
 
 async def main() -> None:
     """Start the bot with long polling."""
-    await dp.start_polling(
-        bot,
-        allowed_updates=["message", "callback_query"],
-    )
+    db = Database()
+    await db.connect()
+
+    scrape_service = ScrapeService(db=db, request_delay=settings.REQUEST_DELAY)
+
+    try:
+        await dp.start_polling(
+            bot,
+            allowed_updates=["message", "callback_query"],
+            db=db,
+            scrape_service=scrape_service,
+        )
+    finally:
+        await db.close()
 
 
 if __name__ == "__main__":

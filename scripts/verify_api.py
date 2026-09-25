@@ -1,9 +1,7 @@
-"""2GIS API verification script -- go/no-go gate for the project.
+"""2GIS web scraping verification script -- go/no-go gate for the project.
 
-Runs a small search query against the 2GIS catalog API and reports
-whether the API key returns contact data (phone, email, website,
-socials).  If contact_groups data is inaccessible, the project
-cannot proceed as designed.
+Runs a small search query by scraping 2GIS web pages and reports whether
+contact data (phone, email, website, socials) is accessible.
 
 Usage:
     python scripts/verify_api.py
@@ -19,42 +17,33 @@ from dotenv import load_dotenv
 sys.path.insert(0, ".")
 
 from api.twogis_client import TwoGISClient
-from config import Settings
 
 
 async def main() -> None:
     """Run a sample search and print contact data availability."""
     load_dotenv()
 
-    try:
-        settings = Settings.from_env()
-    except ValueError as exc:
-        print(f"ERROR: {exc}")
-        sys.exit(1)
-
     query = "рестораны"
     count = 5
 
-    print("=== 2GIS API Verification ===")
+    print("=== 2GIS Web Scraping Verification ===")
     print(f"Query: {query} (Moscow)")
 
     async with aiohttp.ClientSession() as session:
         client = TwoGISClient(
             session=session,
-            api_key=settings.TWOGIS_API_KEY,
-            base_url=settings.TWOGIS_BASE_URL,
-            page_size=settings.PAGE_SIZE,
-            request_delay=settings.REQUEST_DELAY,
+            page_size=50,
+            request_delay=0.5,
         )
 
         try:
             orgs = await client.search(query=query, count=count)
         except Exception as exc:
-            print(f"\nERROR: API request failed: {exc}")
+            print(f"\nERROR: Scraping failed: {exc}")
             sys.exit(1)
 
     if not orgs:
-        print("\nNo results returned. Check your API key and network.")
+        print("\nNo results returned. Check your network connection.")
         sys.exit(1)
 
     print(f"Results: {len(orgs)}\n")
@@ -99,15 +88,9 @@ async def main() -> None:
     )
 
     if has_any_contact:
-        print("VERDICT: PASS -- contact data is accessible")
+        print("VERDICT: PASS -- contact data is accessible via web scraping")
     else:
-        print("VERDICT: FAIL -- API key does not return contact data.")
-        print(
-            "The items.contact_groups field may require a paid API subscription."
-        )
-        print(
-            "See: https://docs.2gis.com/en/platform-manager/subscription/services"
-        )
+        print("VERDICT: FAIL -- no contact data found on web pages.")
         sys.exit(1)
 
 

@@ -1,6 +1,7 @@
 aiogram>=3.4
 aiohttp
 aiosqlite
+Brotli
 python-dotenv
 pytest
 pytest-asyncio

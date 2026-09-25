@@ -11,8 +11,6 @@ class Settings:
     """Application configuration loaded from .env file."""
 
     BOT_TOKEN: str
-    TWOGIS_API_KEY: str
-    TWOGIS_BASE_URL: str = "https://catalog.api.2gis.com/3.0/items"
     PAGE_SIZE: int = 50
     REQUEST_DELAY: float = 0.3
 
@@ -32,13 +30,4 @@ class Settings:
                 "BOT_TOKEN is not set. Add it to your .env file."
             )
 
-        twogis_api_key = os.environ.get("TWOGIS_API_KEY")
-        if not twogis_api_key:
-            raise ValueError(
-                "TWOGIS_API_KEY is not set. Add it to your .env file."
-            )
-
-        return cls(
-            BOT_TOKEN=bot_token,
-            TWOGIS_API_KEY=twogis_api_key,
-        )
+        return cls(BOT_TOKEN=bot_token)

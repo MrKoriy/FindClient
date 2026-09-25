@@ -2,3 +2,7 @@
 .env
 __pycache__/
 *.pyc
+.DS_Store
+.freebuff/
+.pytest_cache/
+*.db
