@@ -1,6 +1,7 @@
 """Application settings loaded from environment variables."""
 
 import os
+import re
 from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
@@ -33,6 +34,18 @@ class Settings:
     TG_SESSION: str = ""
     ORDERS_POLL_INTERVAL: int = 300
     HTTP_PROXY: str = ""
+    # Extra Telegram accounts for outreach (TG_SESSION_2, TG_SESSION_3, ...).
+    TG_EXTRA_SESSIONS: tuple[str, ...] = ()
+    # LLM: DeepSeek via B.AI; Jev (TypeSafe) for typed classification.
+    BAI_API_KEY: str = ""
+    BAI_MODEL: str = "DeepSeek-V4.1-Flash"
+    TYPESAFE_API_KEY: str = ""
+    JEV_MODEL: str = "jev-latest"
+    # Demo sites web server (no domain yet: http://<VPS_IP>:8080).
+    DEMO_BASE_URL: str = ""
+    WEB_PORT: int = 8080
+    OUTREACH_DAILY_MAX: int = 20
+    OUTREACH_WORK_HOURS: str = "10-19"
 
     @property
     def telegram_user_enabled(self) -> bool:
@@ -67,4 +80,16 @@ class Settings:
             TG_SESSION=env("TG_SESSION", "").strip(),
             ORDERS_POLL_INTERVAL=int(env("ORDERS_POLL_INTERVAL", "300") or 300),
             HTTP_PROXY=env("HTTP_PROXY", "").strip(),
+            TG_EXTRA_SESSIONS=tuple(
+                v.strip() for k, v in sorted(os.environ.items())
+                if re.fullmatch(r"TG_SESSION_\d+", k) and v.strip()
+            ),
+            BAI_API_KEY=env("BAI_API_KEY", "").strip(),
+            BAI_MODEL=env("BAI_MODEL", "DeepSeek-V4.1-Flash").strip() or "DeepSeek-V4.1-Flash",
+            TYPESAFE_API_KEY=env("TYPESAFE_API_KEY", "").strip(),
+            JEV_MODEL=env("JEV_MODEL", "jev-latest").strip() or "jev-latest",
+            DEMO_BASE_URL=env("DEMO_BASE_URL", "").strip(),
+            WEB_PORT=int(env("WEB_PORT", "8080") or 8080),
+            OUTREACH_DAILY_MAX=int(env("OUTREACH_DAILY_MAX", "20") or 20),
+            OUTREACH_WORK_HOURS=env("OUTREACH_WORK_HOURS", "10-19").strip() or "10-19",
         )

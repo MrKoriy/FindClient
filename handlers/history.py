@@ -50,5 +50,7 @@ async def on_download(callback: CallbackQuery, db: Database) -> None:
     orgs = [Organization(**r) for r in rows]
     orgs.sort(key=lambda o: o.score, reverse=True)
     data, ext = export(orgs, ORG_COLUMNS)
-    await callback.message.answer_document(document(data, f"сбор_{callback.data.split(':')[2]}.{ext}"),
-                                           caption=plural(len(orgs), "компания", "компании", "компаний"))
+    sid = callback.data.split(":")[2]
+    await callback.message.answer_document(document(data, f"сбор_{sid}.{ext}"),
+                                           caption=plural(len(orgs), "компания", "компании", "компаний"),
+                                           reply_markup=kb([[("📨 Добавить в рассылку", f"out:pick:{sid}")]]))

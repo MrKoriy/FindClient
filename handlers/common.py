@@ -50,6 +50,7 @@ MAIN_MENU = kb([
     [("🔎 Компании с карт (2GIS + Яндекс)", "menu:scrape")],
     [("💰 Денежные ниши", "menu:niches"), ("👷 Telegram-лиды", "menu:tg")],
     [("💼 Заказы с бирж", "menu:orders")],
+    [("📨 Рассылки + CRM", "menu:out"), ("🧠 Офферы", "menu:offers")],
     [("🕘 История", "menu:history"), ("📈 Статистика", "menu:stats")],
 ])
 
@@ -111,3 +112,19 @@ async def safe_edit(callback: CallbackQuery, text: str, markup: InlineKeyboardMa
 def document(data: bytes, name: str) -> BufferedInputFile:
     safe = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in name)
     return BufferedInputFile(data, filename=safe)
+
+
+def niche_picker_categories(prefix: str, back: str) -> InlineKeyboardMarkup:
+    """Category list; callbacks `{prefix}:cat:{i}`, custom text `{prefix}:custom`."""
+    from data.niches import CATEGORIES
+
+    items = [(c, f"{prefix}:cat:{i}") for i, c in enumerate(CATEGORIES)]
+    return kb(grid(items, 2) + [[("✍️ Своя ниша", f"{prefix}:custom")], [("⬅️ Назад", back)]])
+
+
+def niche_picker_niches(prefix: str, cat_index: int) -> tuple[str, InlineKeyboardMarkup]:
+    from data.niches import CATEGORIES, niches_in
+
+    category = CATEGORIES[cat_index]
+    items = [(n.label, f"{prefix}:n:{n.id}") for n in niches_in(category)]
+    return category, kb(grid(items, 1) + [[("⬅️ Категории", f"{prefix}:cats")]])

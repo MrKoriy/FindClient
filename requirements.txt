@@ -8,3 +8,5 @@ curl_cffi
 telethon
 pytest
 pytest-asyncio
+youtube-transcript-api>=1.2
+tzdata

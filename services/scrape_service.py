@@ -1,5 +1,6 @@
 """Company search orchestration: sources (2GIS, Yandex) -> merge -> filter -> dedup -> save -> table."""
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
@@ -53,6 +54,7 @@ class ScrapeResult:
     already_in_db: int = 0
     per_source: dict[str, int] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
+    session_id: int = 0
 
     @property
     def with_phone(self) -> int:
@@ -144,6 +146,8 @@ class ScrapeService:
                 query, req.city, need, only_without_site=req.only_without_site,
                 skip_ids=skip, on_progress=on_page,
             )
+        except (aiohttp.ClientConnectionError, asyncio.TimeoutError):
+            raise  # 2gis.ru itself is unreachable — page scraping would only wait longer
         except Exception as exc:
             log.warning("2GIS API failed, falling back to web pages: %s", exc)
 
@@ -189,7 +193,7 @@ class ScrapeService:
         errors: list[str] = []
         searchers = {"2gis": self._search_2gis, "yandex": self._search_yandex}
 
-        timeout = aiohttp.ClientTimeout(total=60)
+        timeout = aiohttp.ClientTimeout(total=60, sock_connect=10)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             for source in req.sources:
                 search = searchers.get(source)
@@ -221,8 +225,9 @@ class ScrapeService:
         fresh.sort(key=lambda o: o.score, reverse=True)
         fresh = fresh[: req.count]
 
+        session_id = 0
         if fresh:
-            await self.db.save_session(
+            session_id = await self.db.save_session(
                 req.niche, [asdict(o) for o in fresh], city=req.city,
                 sources=",".join(req.sources), filters=req.filters,
             )
@@ -234,4 +239,5 @@ class ScrapeService:
             already_in_db=len(known),
             per_source=per_source,
             errors=errors,
+            session_id=session_id,
         )

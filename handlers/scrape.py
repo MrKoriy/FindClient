@@ -252,7 +252,10 @@ async def run_search(message: Message, req: ScrapeRequest, fmt: str, scrape_serv
     await status.edit_text(summary_text(req, result), parse_mode="HTML")
     data, ext = result.file(fmt)
     name = f"{req.niche}_{req.city}_{len(result.organizations)}.{ext}"
-    await message.answer_document(document(data, name), caption=plural(len(result.organizations), "компания", "компании", "компаний"))
+    await message.answer_document(
+        document(data, name), caption=plural(len(result.organizations), "компания", "компании", "компаний"),
+        reply_markup=kb([[("📨 Добавить в рассылку", f"out:pick:{result.session_id}")]]) if result.session_id else None,
+    )
 
 
 @router.callback_query(F.data == "sc:go")

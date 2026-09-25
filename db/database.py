@@ -350,3 +350,14 @@ class Database:
             ],
         )
         await self._db.commit()
+
+    async def get_tg_leads(self, niche: str | None = None, limit: int = 1000) -> list[dict]:
+        assert self._db
+        sql = "SELECT user_id, username, name, niche, chats FROM tg_leads"
+        params: tuple = ()
+        if niche:
+            sql += " WHERE niche = ?"
+            params = (niche,)
+        cur = await self._db.execute(sql + " ORDER BY created_at DESC LIMIT ?", (*params, limit))
+        return [{"user_id": r[0], "username": r[1], "name": r[2], "niche": r[3], "chats": r[4]}
+                for r in await cur.fetchall()]

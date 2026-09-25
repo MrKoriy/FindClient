@@ -16,6 +16,7 @@ from api.orders import (
     matches,
 )
 from db.database import Database
+from services.classifier import SITE_ORDER_Q, qualify_texts
 from models.order import Order
 
 log = logging.getLogger(__name__)
@@ -53,8 +54,10 @@ class OrdersService:
         sender: Sender | None = None,
         interval: int = 300,
         tg_groups_fetcher: Fetcher | None = None,
+        llm=None,
     ) -> None:
         self.db = db
+        self.llm = llm
         self.sender = sender
         self.interval = max(60, interval)
         self.tg_groups_fetcher = tg_groups_fetcher
@@ -107,12 +110,14 @@ class OrdersService:
         new_uids = await self.db.filter_new_order_uids(list(by_uid))
         new_orders = [by_uid[u] for u in by_uid if u in new_uids]
 
+        rejected = await self._jev_rejects(new_orders, configs)
         sent: dict[int, list[Order]] = {}
         matched_uids: set[str] = set()
         for chat_id, cfg in configs.items():
             hits = [
                 o for o in new_orders
-                if self._source_key(o) in cfg["sources"] and matches(o, cfg["keywords"], cfg["minus"])
+                if o.uid not in rejected
+                and self._source_key(o) in cfg["sources"] and matches(o, cfg["keywords"], cfg["minus"])
             ]
             if first_run:
                 hits = hits[:_FIRST_RUN_LIMIT]
@@ -132,6 +137,15 @@ class OrdersService:
             for o in new_orders
         ])
         return sent
+
+    async def _jev_rejects(self, orders: list[Order], configs: dict) -> set[str]:
+        """Second-stage filter: Jev drops keyword hits that are vacancies/ads (no-op without Jev)."""
+        if not (self.llm and getattr(self.llm, "jev_enabled", False)):
+            return set()
+        candidates = [o for o in orders
+                      if any(matches(o, cfg["keywords"], cfg["minus"]) for cfg in configs.values())]
+        probs = await qualify_texts(self.llm, [f"{o.title}\n{o.description}" for o in candidates], SITE_ORDER_Q)
+        return {o.uid for o, p in zip(candidates, probs) if p is not None and p < 0.4}
 
     @staticmethod
     def _source_key(o: Order) -> str:
