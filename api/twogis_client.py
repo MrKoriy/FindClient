@@ -14,23 +14,17 @@ from urllib.parse import quote
 
 import aiohttp
 
+from api.common import USER_AGENTS, clean_social, clean_url, is_social_url, lead_score
 from models.organization import Organization
 
 
-# Social network contact types recognized by the parser.
+# Social network / messenger contact types recognized by the parser.
 _SOCIAL_TYPES = frozenset(
-    ("vk", "vkontakte", "instagram", "facebook", "twitter", "youtube", "skype", "icq")
+    ("vk", "vkontakte", "instagram", "facebook", "twitter", "youtube", "skype", "icq",
+     "telegram", "whatsapp", "viber", "odnoklassniki", "max")
 )
 
-# Rotating User-Agents to reduce fingerprinting.
-_USER_AGENTS = [
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 Edg/129.0.0.0",
-]
+_USER_AGENTS = USER_AGENTS
 
 _MAX_RETRIES = 3
 _RETRY_STATUSES = {429, 503}
@@ -41,9 +35,11 @@ try:
 except ImportError:
     _ACCEPT_ENCODING = "gzip, deflate"
 
-_SEARCH_URL = "https://2gis.ru/moscow/search/{query}"
-_SEARCH_PAGE_URL = "https://2gis.ru/moscow/search/{query}/page/{page}"
-_FIRM_URL = "https://2gis.ru/moscow/firm/{org_id}"
+_SEARCH_URL = "https://2gis.ru/{city}/search/{query}"
+_SEARCH_PAGE_URL = "https://2gis.ru/{city}/search/{query}/page/{page}"
+_FIRM_URL = "https://2gis.ru/{city}/firm/{org_id}"
+# Without this cookie 2gis.ru may redirect to an "update your browser" page.
+_COOKIES = {"dg5_museum_accept": "true"}
 
 # Both search and firm pages use: var initialState = JSON.parse('...');
 _STATE_RE = re.compile(
@@ -52,9 +48,9 @@ _STATE_RE = re.compile(
 
 
 class TwoGISClient:
-    """Scrapes 2GIS website for organization search and contact data.
+    """Scrapes 2GIS website pages (fallback when the catalog API is unavailable).
 
-    No API key needed -- all data comes from web page scraping.
+    Slower than api.twogis_api (one request per firm for contacts).
 
     Args:
         session: An open aiohttp.ClientSession for making HTTP requests.
@@ -67,10 +63,14 @@ class TwoGISClient:
         session: aiohttp.ClientSession,
         page_size: int = 50,
         request_delay: float = 0.3,
+        city_slug: str = "moscow",
+        city_name: str = "",
     ) -> None:
         self.session = session
         self.page_size = page_size
         self.request_delay = request_delay
+        self.city_slug = city_slug or "moscow"
+        self.city_name = city_name
 
     async def search(
         self,
@@ -113,6 +113,12 @@ class TwoGISClient:
                     org.email = contacts["email"]
                     org.website = contacts["website"]
                     org.socials = contacts["socials"]
+                org.city = self.city_name
+                org.url = _FIRM_URL.format(city=self.city_slug, org_id=org.id)
+                org.score = lead_score(
+                    has_website=org.has_website, phone=org.phone, reviews=org.reviews,
+                    branches=org.branches, rating=org.rating,
+                )
                 if self.request_delay > 0:
                     await asyncio.sleep(self._jittered_delay())
 
@@ -135,9 +141,9 @@ class TwoGISClient:
         """Fetch and parse a search results page from 2GIS website."""
         encoded = quote(query)
         if page == 1:
-            url = _SEARCH_URL.format(query=encoded)
+            url = _SEARCH_URL.format(city=self.city_slug, query=encoded)
         else:
-            url = _SEARCH_PAGE_URL.format(query=encoded, page=page)
+            url = _SEARCH_PAGE_URL.format(city=self.city_slug, query=encoded, page=page)
 
         html = await self._fetch_html(url)
         if html is None:
@@ -155,7 +161,7 @@ class TwoGISClient:
 
     async def _fetch_contacts_from_web(self, org_id: str) -> dict[str, str] | None:
         """Scrape contact data from the 2GIS firm web page."""
-        url = _FIRM_URL.format(org_id=org_id)
+        url = _FIRM_URL.format(city=self.city_slug, org_id=org_id)
         html = await self._fetch_html(url)
         if html is None:
             return None
@@ -186,7 +192,7 @@ class TwoGISClient:
         }
         for attempt in range(_MAX_RETRIES):
             try:
-                async with self.session.get(url, headers=headers) as resp:
+                async with self.session.get(url, headers=headers, cookies=_COOKIES) as resp:
                     if resp.status == 200:
                         return await resp.text()
                     if resp.status in _RETRY_STATUSES and attempt < _MAX_RETRIES - 1:
@@ -232,9 +238,12 @@ class TwoGISClient:
                     url = contact.get("alias") or value
                     if "link.2gis.ru" in url and "?" in url:
                         url = url.split("?", 1)[1]
-                    websites.append(url)
+                    if is_social_url(url):
+                        socials.append(clean_social(url))
+                    else:
+                        websites.append(clean_url(url))
                 elif ctype in _SOCIAL_TYPES:
-                    socials.append(contact.get("url", value))
+                    socials.append(clean_social(contact.get("url", value)))
 
         return {
             "phone": ", ".join(phones),
@@ -290,13 +299,18 @@ def _parse_search_profiles(state: dict[str, Any]) -> list[Organization]:
 
         name = data.get("name_ex", {}).get("primary", "") or data.get("name", "")
         address = data.get("address_name", "")
-        rating = data.get("reviews", {}).get("general_rating", 0.0)
+        reviews = data.get("reviews") or {}
+        rating = reviews.get("general_rating") or 0.0
+        rubrics = [r.get("name", "") for r in data.get("rubrics") or [] if r.get("kind") == "primary"]
 
         orgs.append(Organization(
             id=str(firm_id),
             name=name,
             address=address,
             rating=float(rating),
+            reviews=int(reviews.get("general_review_count") or 0),
+            branches=int((data.get("org") or {}).get("branch_count") or 0),
+            category=", ".join(rubrics),
         ))
 
     return orgs
