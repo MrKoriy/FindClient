@@ -88,6 +88,7 @@ class TestMatching:
     def test_vacancies_and_minus_words_rejected(self):
         assert not matches(self._o("Вакансия: верстальщик сайтов в штат"))
         assert not matches(self._o("Лендинг на Tilda"), minus=["tilda"])
+        assert not matches(self._o("Делаю сайты на Tilda недорого"))
 
     def test_custom_keywords(self):
         assert matches(self._o("Бот для записи", "телеграм бот"), keywords=["бот"])
