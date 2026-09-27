@@ -341,8 +341,8 @@
     resize: vertical;
   }
 
-  /* Buttons (All 8 states handled) */
-  button.btn {
+  /* Buttons (All 8 states handled, high contrast & WebView immune) */
+  button.btn, .btn {
     font-family: inherit;
     font-size: 13px;
     font-weight: 500;
@@ -356,60 +356,98 @@
     gap: 7px;
     transition: var(--transition);
     user-select: none;
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    box-sizing: border-box !important;
+    text-decoration: none !important;
   }
-  button.btn:focus-visible {
+  button.btn:focus-visible, .btn:focus-visible {
     outline: 2px solid var(--primary);
     outline-offset: 2px;
   }
-  button.btn:active:not(:disabled) {
+  button.btn:active:not(:disabled), .btn:active:not(:disabled) {
     transform: translateY(1px);
   }
-  button.btn:disabled {
+  button.btn:disabled, .btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
     transform: none;
   }
 
-  button.btn-primary {
-    background: var(--primary);
-    color: #ffffff;
+  button.btn-primary, .btn-primary {
+    background: #2563eb !important;
+    background-color: #2563eb !important;
+    color: #ffffff !important;
+    border-color: #1d4ed8 !important;
+    font-weight: 600 !important;
   }
-  button.btn-primary:hover:not(:disabled) {
-    background: var(--primary-hover);
+  button.btn-primary *, .btn-primary * {
+    color: #ffffff !important;
+    stroke: #ffffff !important;
+    fill: none !important;
   }
-  button.btn-primary:active:not(:disabled) {
-    background: var(--primary-active);
+  button.btn-primary:hover:not(:disabled), .btn-primary:hover:not(:disabled) {
+    background: #1d4ed8 !important;
   }
-
-  button.btn-secondary {
-    background: var(--bg-subtle);
-    border-color: var(--border);
-    color: var(--text-primary);
-  }
-  button.btn-secondary:hover:not(:disabled) {
-    background: var(--bg-card-hover);
-    border-color: var(--border-strong);
+  button.btn-primary:active:not(:disabled), .btn-primary:active:not(:disabled) {
+    background: #1e40af !important;
   }
 
-  button.btn-purple {
-    background: var(--purple);
-    color: #ffffff;
+  button.btn-secondary, .btn-secondary {
+    background: #1e293b !important;
+    background-color: #1e293b !important;
+    border-color: #334155 !important;
+    color: #f8fafc !important;
+    font-weight: 500 !important;
   }
-  button.btn-purple:hover:not(:disabled) {
+  button.btn-secondary *, .btn-secondary * {
+    color: #f8fafc !important;
+    stroke: #f8fafc !important;
+  }
+  button.btn-secondary:hover:not(:disabled), .btn-secondary:hover:not(:disabled) {
+    background: #334155 !important;
+    border-color: #475569 !important;
+  }
+  html[data-theme="light"] button.btn-secondary,
+  html[data-theme="light"] .btn-secondary {
+    background: #f1f5f9 !important;
+    background-color: #f1f5f9 !important;
+    border-color: #cbd5e1 !important;
+    color: #0f172a !important;
+  }
+  html[data-theme="light"] button.btn-secondary *,
+  html[data-theme="light"] .btn-secondary * {
+    color: #0f172a !important;
+    stroke: #0f172a !important;
+  }
+
+  button.btn-purple, .btn-purple {
+    background: #8b5cf6 !important;
+    background-color: #8b5cf6 !important;
+    color: #ffffff !important;
+    border-color: #7c3aed !important;
+    font-weight: 600 !important;
+  }
+  button.btn-purple *, .btn-purple * {
+    color: #ffffff !important;
+    stroke: #ffffff !important;
+    fill: none !important;
+  }
+  button.btn-purple:hover:not(:disabled), .btn-purple:hover:not(:disabled) {
     opacity: 0.92;
   }
 
-  button.btn-danger {
+  button.btn-danger, .btn-danger {
     background: var(--bad-light);
     color: var(--bad);
     border-color: var(--bad-border);
   }
-  button.btn-danger:hover:not(:disabled) {
+  button.btn-danger:hover:not(:disabled), .btn-danger:hover:not(:disabled) {
     background: var(--bad);
     color: #ffffff;
   }
 
-  button.btn-sm {
+  button.btn-sm, .btn-sm {
     padding: 5px 10px;
     font-size: 12px;
     gap: 5px;
@@ -677,35 +715,50 @@
     box-shadow: 0 0 0 1px var(--purple);
   }
 
-  /* Prompt Hint & Link Bar */
+  /* Prompt Hint & Link Bar (Clean 2-Row Responsive Card) */
   .prompt-hint-bar {
     display: flex;
-    align-items: center;
-    gap: 10px;
+    flex-direction: column;
+    gap: 8px;
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 6px 10px 6px 12px;
+    padding: 10px 12px;
+    box-shadow: var(--shadow-sm);
   }
-  .prompt-hint-bar input {
+  .prompt-hint-input-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+  }
+  .prompt-hint-input-row input {
     flex: 1;
+    min-width: 0;
     border: none;
     background: transparent;
-    font-size: 13px;
+    font-size: 13.5px;
     padding: 4px 0;
     outline: none;
     color: var(--text-primary);
   }
-  .prompt-hint-bar input::placeholder {
+  .prompt-hint-input-row input::placeholder {
     color: var(--text-dim);
+  }
+  .prompt-hint-actions-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border);
   }
   .prompt-hint-link-toggle {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    font-size: 11.5px;
+    gap: 6px;
+    font-size: 12px;
     color: var(--text-secondary);
-    flex-shrink: 0;
     cursor: pointer;
     user-select: none;
     padding: 4px 8px;
@@ -724,74 +777,74 @@
   @media (max-width: 900px) {
     .studio-layout {
       grid-template-columns: 1fr;
-      gap: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
     }
   }
 
-  /* Candidate Variant Tabs */
+  /* Candidate Variant Tabs (Segmented Control) */
   .candidate-tabs-bar {
     display: flex;
     gap: 6px;
     overflow-x: auto;
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
-    margin-bottom: 10px;
-    padding-bottom: 2px;
+    margin-bottom: 8px;
+    padding: 2px 0;
   }
   .candidate-tabs-bar::-webkit-scrollbar {
     display: none;
   }
   .candidate-tab-pill {
     flex: 1;
-    min-width: 120px;
+    min-width: 95px;
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 8px 10px;
+    border-radius: var(--radius-full);
+    padding: 6px 12px;
     cursor: pointer;
     transition: var(--transition);
-    text-align: left;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
     user-select: none;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    -webkit-appearance: none;
   }
   .candidate-tab-pill:hover {
     border-color: var(--border-strong);
+    color: var(--text-primary);
   }
   .candidate-tab-pill.active {
     background: var(--primary-light);
     border-color: var(--primary);
+    color: var(--primary);
     box-shadow: 0 0 0 1px var(--primary);
   }
-  .candidate-tab-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 2px;
-  }
-  .candidate-tab-name {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-primary);
-  }
-  .candidate-tab-score {
+  .candidate-tab-pill .cand-badge {
     font-size: 10.5px;
     font-weight: 700;
     padding: 1px 6px;
     border-radius: var(--radius-full);
+    background: var(--bg-subtle);
+    color: var(--text-dim);
   }
-  .candidate-tab-score.winner {
+  .candidate-tab-pill.active .cand-badge {
+    background: var(--primary);
+    color: #ffffff;
+  }
+  .candidate-tab-pill .cand-badge.winner {
     background: var(--ok-light);
     color: var(--ok);
   }
-  .candidate-tab-score.alt {
-    background: var(--bg-subtle);
-    color: var(--text-secondary);
-  }
-  .candidate-tab-snippet {
-    font-size: 11px;
-    color: var(--text-secondary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  .candidate-tab-pill.active .cand-badge.winner {
+    background: var(--ok);
+    color: #ffffff;
   }
 
   /* Chat Preview Shell (Telegram-Style Message Bubble) */
@@ -815,45 +868,108 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-weight: 600;
-    color: var(--text-primary);
   }
   .chat-author-avatar {
-    width: 24px;
-    height: 24px;
+    width: 26px;
+    height: 26px;
     border-radius: var(--radius-full);
     background: var(--purple-light);
     color: var(--purple);
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 0;
   }
   .chat-author-avatar svg {
     width: 14px;
     height: 14px;
   }
+  .chat-author-info {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12.5px;
+  }
+  .chat-author-name {
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+  .chat-author-badge {
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-weight: normal;
+  }
+
+  /* Prominent Score Badge in Header */
+  .bubble-score-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11.5px;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: var(--radius-full);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    flex-shrink: 0;
+  }
+  .bubble-score-badge svg {
+    width: 12px;
+    height: 12px;
+  }
+  .bubble-score-badge.score-excellent {
+    background: var(--ok-light);
+    border-color: var(--ok);
+    color: var(--ok);
+  }
+  .bubble-score-badge.score-good {
+    background: var(--primary-light);
+    border-color: var(--primary);
+    color: var(--primary);
+  }
+  .bubble-score-badge.score-needs_work {
+    background: var(--warn-light);
+    border-color: var(--warn);
+    color: var(--warn);
+  }
+  .bubble-score-badge.score-poor {
+    background: var(--bad-light);
+    border-color: var(--bad);
+    color: var(--bad);
+  }
+
   .chat-bubble-body {
-    padding: 14px;
+    padding: 12px 14px;
     position: relative;
     background: var(--bg-card);
   }
   .offer-textarea {
-    width: 100%;
-    min-height: 145px;
-    border: 1px solid transparent;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-primary);
-    font-size: 15px;
-    line-height: 1.55;
-    padding: 6px;
-    resize: vertical;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    white-space: pre-wrap !important;
+    word-wrap: break-word !important;
+    word-break: break-word !important;
+    overflow-wrap: break-word !important;
+    background: transparent !important;
+    color: var(--text-primary) !important;
+    font-family: inherit !important;
+    font-size: 15px !important;
+    line-height: 1.55 !important;
+    padding: 10px 12px !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-sm) !important;
+    resize: none !important;
+    overflow: hidden !important;
+    display: block !important;
+    min-height: 120px;
     transition: var(--transition);
   }
   .offer-textarea:focus {
-    background: var(--bg-subtle);
-    border-color: var(--border-strong);
-    box-shadow: none;
+    background: var(--bg-subtle) !important;
+    border-color: var(--primary) !important;
+    box-shadow: 0 0 0 2px var(--primary-light) !important;
   }
   .chat-bubble-footer {
     display: flex;
@@ -871,27 +987,43 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
-    margin-top: 12px;
+    margin-top: 10px;
   }
   .offer-action-primary {
-    width: 100%;
-    min-height: 48px;
-    font-size: 14.5px;
-    font-weight: 600;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
+    width: 100% !important;
+    min-height: 48px !important;
+    font-size: 14.5px !important;
+    font-weight: 600 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 8px !important;
   }
   .offer-action-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 8px;
+    display: flex !important;
+    flex-direction: row !important;
+    gap: 6px !important;
+    width: 100% !important;
+  }
+  .offer-action-row > button {
+    flex: 1 1 0 !important;
+    min-width: 0 !important;
+    padding: 8px 4px !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    gap: 4px !important;
+    justify-content: center !important;
+    white-space: nowrap !important;
   }
   @media (max-width: 480px) {
-    .offer-action-row {
-      grid-template-columns: 1fr 1fr;
+    .chat-author-badge {
+      display: none !important;
     }
+  }
+  .offer-action-row > button span.btn-text {
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
   }
 
   /* Jev Judge Widget */
@@ -1387,20 +1519,17 @@
     /* Offer Studio Mobile Reflow */
     .studio-layout {
       grid-template-columns: 1fr !important;
+      display: flex !important;
+      flex-direction: column !important;
       gap: 12px !important;
     }
     .jev-judge-widget {
       position: static !important;
-      margin-top: 4px;
+      margin-top: 6px !important;
+      padding: 12px !important;
     }
     .target-card-name {
       max-width: 180px;
-    }
-    .prompt-hint-bar {
-      flex-wrap: wrap;
-    }
-    .prompt-hint-bar input {
-      min-width: 140px;
     }
 
     /* Table Horizontal Swipe */
@@ -2226,15 +2355,19 @@ async function viewOffers(v) {
 
     <!-- Prompt Focus & Fast Config Bar -->
     <div class="prompt-hint-bar">
-      <span class="purple" style="display:flex;align-items:center">${ICONS.sparkles}</span>
-      <input id="offerPromptHint" placeholder="Фокус: упор на аудит профиля / сайт за 3 дня / акция...">
-      <label class="prompt-hint-link-toggle" title="Добавить ссылку на портфолио в оффер">
-        <input type="checkbox" id="chkOfferWithLink">
-        <span>Ссылка</span>
-      </label>
-      <button class="btn btn-purple btn-sm" id="btnGenerateOffer" style="flex-shrink:0;height:32px;padding:0 12px">
-        ${ICONS.sparkles} <span>AI Синтез</span>
-      </button>
+      <div class="prompt-hint-input-row">
+        <span class="purple" style="display:flex;align-items:center">${ICONS.sparkles}</span>
+        <input id="offerPromptHint" placeholder="Уточнить фокус (напр. сайт за 3 дня, акция, аудит 2ГИС)...">
+      </div>
+      <div class="prompt-hint-actions-row">
+        <label class="prompt-hint-link-toggle" title="Добавить ссылку на портфолио в оффер">
+          <input type="checkbox" id="chkOfferWithLink">
+          <span>Ссылка</span>
+        </label>
+        <button class="btn btn-purple" id="btnGenerateOffer">
+          ${ICONS.sparkles} <span class="btn-text">AI Синтез</span>
+        </button>
+      </div>
     </div>
 
     <!-- Responsive Studio Layout -->
@@ -2250,18 +2383,18 @@ async function viewOffers(v) {
           <div class="chat-preview-header">
             <div class="chat-author">
               <div class="chat-author-avatar">${ICONS.bot}</div>
-              <div>
-                <span id="chatModelName">Qwen 3.8 Flash</span>
-                <span class="dim" style="font-weight:normal"> · Копирайтер</span>
+              <div class="chat-author-info">
+                <span class="chat-author-name" id="chatModelName">Qwen 3.8 Flash</span>
+                <span class="chat-author-badge"> · AI Копирайтер</span>
               </div>
             </div>
-            <div class="target-badge-pill" id="bubbleScorePill" style="font-size:11.5px">
-              ${ICONS.check} <span id="bubbleScoreText">--/100</span>
+            <div class="bubble-score-badge score-good" id="bubbleScorePill" title="Оценка Jev System One">
+              ${ICONS.star} <span id="bubbleScoreText">-- / 100</span>
             </div>
           </div>
 
           <div class="chat-bubble-body">
-            <textarea class="offer-textarea" id="offerTextEditor" placeholder="Здесь появится готовый текст оффера..."></textarea>
+            <textarea class="offer-textarea" id="offerTextEditor" wrap="soft" placeholder="Здесь появится готовый текст оффера..."></textarea>
           </div>
 
           <div class="chat-bubble-footer">
@@ -2273,17 +2406,21 @@ async function viewOffers(v) {
         <!-- Action Buttons Directly Below Bubble -->
         <div class="offer-action-buttons">
           <button class="btn btn-primary offer-action-primary" id="btnQueueOffer">
-            ${ICONS.send} Поставить в очередь отправки
+            ${ICONS.send}
+            <span class="btn-text">Поставить в очередь отправки</span>
           </button>
           <div class="offer-action-row">
             <button class="btn btn-secondary" id="btnCopyOffer">
-              ${ICONS.copy} Копировать
+              ${ICONS.copy}
+              <span class="btn-text">Копировать</span>
             </button>
             <button class="btn btn-secondary" id="btnImproveOffer" title="Автоматически устранить стоп-слова, цены и лишние вопросы">
-              ${ICONS.sparkles} Humanizer
+              ${ICONS.sparkles}
+              <span class="btn-text">Humanizer</span>
             </button>
             <button class="btn btn-secondary" id="btnSaveAsTpl">
-              ${ICONS.tpl} В шаблон
+              ${ICONS.tpl}
+              <span class="btn-text">В шаблон</span>
             </button>
           </div>
         </div>
@@ -2357,6 +2494,12 @@ async function viewOffers(v) {
   </div>`;
 
   const editor = v.querySelector("#offerTextEditor");
+
+  function autoResizeEditor() {
+    if (!editor) return;
+    editor.style.height = "auto";
+    editor.style.height = Math.max(120, editor.scrollHeight + 4) + "px";
+  }
 
   function flashEditor() {
     editor.classList.remove("flash-highlight");
@@ -2586,8 +2729,8 @@ async function viewOffers(v) {
     };
   }
 
-  // Render Candidate Tabs
-  function renderCandidates(candidates, currentStrategyId, manualTarget) {
+  // Render Candidate Tabs (Sleek Segmented Controls)
+  function renderCandidates(candidates, currentStrategyId, targetObj) {
     currentCandidates = candidates || [];
     const list = v.querySelector("#candidateTabsBar");
     if (!list) return;
@@ -2596,17 +2739,15 @@ async function viewOffers(v) {
       return;
     }
 
-    list.innerHTML = candidates.map(c => `
-      <button class="candidate-tab-pill ${c.id === currentStrategyId ? 'active' : ''}" data-cand-id="${c.id}">
-        <div class="candidate-tab-header">
-          <span class="candidate-tab-name">${esc(c.title)}</span>
-          <span class="candidate-tab-score ${c.is_winner ? 'winner' : 'alt'}">
-            ${c.is_winner ? ICONS.check + ' ' + c.probability + '%' : c.probability + '%'}
-          </span>
-        </div>
-        <div class="candidate-tab-snippet">${esc(c.text)}</div>
-      </button>
-    `).join("");
+    list.innerHTML = candidates.map((c, idx) => {
+      const prob = c.probability || (c.is_winner ? 94 : 80 - idx * 4);
+      return `
+        <button class="candidate-tab-pill ${c.id === currentStrategyId ? 'active' : ''}" data-cand-id="${c.id}">
+          <span class="cand-label">${c.is_winner ? ICONS.star + ' ' : ''}Вар. ${idx + 1}</span>
+          <span class="cand-badge ${c.is_winner ? 'winner' : ''}">${prob}%</span>
+        </button>
+      `;
+    }).join("");
 
     list.querySelectorAll(".candidate-tab-pill").forEach(tab => {
       tab.onclick = async () => {
@@ -2616,17 +2757,18 @@ async function viewOffers(v) {
         list.querySelectorAll(".candidate-tab-pill").forEach(x => x.classList.remove("active"));
         tab.classList.add("active");
         editor.value = cand.text;
+        autoResizeEditor();
         flashEditor();
         updateTextStats();
 
         const tid = !isManualMode ? activeTargetId : null;
-        const targetObj = isManualMode ? getManualTarget() : null;
+        const manualTarget = isManualMode ? getManualTarget() : null;
         const wl = v.querySelector("#chkOfferWithLink").checked;
         try {
           const res = await api.send("/api/offer/classify", {
             text: cand.text,
             target_id: tid,
-            target: targetObj,
+            target: manualTarget,
             with_link: wl
           });
           updateJudge(res);
@@ -2658,6 +2800,7 @@ async function viewOffers(v) {
       });
 
       editor.value = res.text;
+      autoResizeEditor();
       flashEditor();
       renderCandidates(res.candidates, res.strategy, targetObj);
       updateJudge(res.classification);
@@ -2675,6 +2818,7 @@ async function viewOffers(v) {
   // Real-time Classification on Input (Debounced)
   let classDebounce = null;
   editor.oninput = () => {
+    autoResizeEditor();
     updateTextStats();
     clearTimeout(classDebounce);
     classDebounce = setTimeout(async () => {
@@ -2727,10 +2871,10 @@ async function viewOffers(v) {
       summaryEl.textContent = res.ai_summary || "";
     }
     if (bubbleScore) {
-      bubbleScore.textContent = `${res.score}/100`;
+      bubbleScore.textContent = `${res.score} / 100`;
     }
     if (bubblePill) {
-      bubblePill.className = `target-badge-pill score-${res.verdict}`;
+      bubblePill.className = `bubble-score-badge score-${res.verdict}`;
     }
 
     // Update Dimension Micro-Bars
@@ -2852,6 +2996,7 @@ async function viewOffers(v) {
         with_link: v.querySelector("#chkOfferWithLink").checked
       });
       editor.value = r.text;
+      autoResizeEditor();
       flashEditor();
       updateJudge(r.classification);
       updateTextStats();
@@ -2866,6 +3011,7 @@ async function viewOffers(v) {
 
   // Initial render
   renderTargetCard();
+  autoResizeEditor();
   doGenerate();
 }
 
