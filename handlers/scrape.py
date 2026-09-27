@@ -252,7 +252,7 @@ async def run_search(message: Message, req: ScrapeRequest, fmt: str, scrape_serv
         return
 
     await status.edit_text(summary_text(req, result), parse_mode="HTML")
-    data, ext = result.file(fmt)
+    data, ext = await result.file(fmt)
     name = f"{req.niche}_{req.city}_{len(result.organizations)}.{ext}"
     await message.answer_document(
         document(data, name),

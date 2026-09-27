@@ -16,22 +16,19 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
-import time
-import urllib.error
-import urllib.request
 from typing import Any
 
 from dotenv import load_dotenv
 
-load_dotenv()
-load_dotenv("crm.env")
-
 from crm import bai
 from crm import templates as tpl
+from crm.http import post_json
+
+load_dotenv()
+load_dotenv("crm.env")
 
 log = logging.getLogger("crm.offer")
 
@@ -103,7 +100,7 @@ def get_strategies() -> list[dict[str, str]]:
     ]
 
 
-def synthesize_candidates(
+async def synthesize_candidates(
     target: dict[str, Any] | None = None,
     link: str = "",
     with_link: bool = False,
@@ -123,7 +120,7 @@ def synthesize_candidates(
     bai_text = None
     if bkey:
         try:
-            bai_text = bai.generate_bai_offer(
+            bai_text = await bai.generate_bai_offer(
                 target=target,
                 strategy_id="lost_traffic",
                 prompt_hint=prompt_hint,
@@ -198,7 +195,7 @@ def synthesize_candidates(
     return candidates
 
 
-def select_best_with_jev(
+async def select_best_with_jev(
     candidates: list[dict[str, Any]],
     target: dict[str, Any] | None = None,
     api_key: str = "",
@@ -227,38 +224,27 @@ def select_best_with_jev(
         },
     }
 
-    for attempt in range(3):
-        try:
-            req = urllib.request.Request(
-                TYPESAFE_URL,
-                data=json.dumps(body).encode("utf-8"),
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {key}",
-                    "User-Agent": "FindClient-CRM/2.0",
-                },
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=12) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                ans = data.get("answers", {}).get("best_offer", {})
-                choice = ans.get("choice")
-                probs = ans.get("probabilities", {})
-                confidence = float(ans.get("confidence", 0.5))
-                return {
-                    "choice": choice,
-                    "probabilities": probs,
-                    "confidence": confidence,
-                    "model": data.get("model", "jev"),
-                }
-        except Exception as exc:
-            log.debug("TypeSafe Jev candidate selection attempt %d failed: %s", attempt + 1, exc)
-            if attempt < 2:
-                time.sleep(0.5 * (attempt + 1))
-    return None
+    data = await post_json(
+        TYPESAFE_URL,
+        body,
+        {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {key}",
+            "User-Agent": "FindClient-CRM/2.0",
+        },
+    )
+    if not data:
+        return None
+    ans = data.get("answers", {}).get("best_offer", {})
+    return {
+        "choice": ans.get("choice"),
+        "probabilities": ans.get("probabilities", {}),
+        "confidence": float(ans.get("confidence", 0.5)),
+        "model": data.get("model", "jev"),
+    }
 
 
-def generate_offer(
+async def generate_offer(
     target: dict[str, Any] | None = None,
     strategy_id: str = "lost_traffic",
     link: str = "",
@@ -283,7 +269,7 @@ def generate_offer(
         }
 
     # Синтезируем 4 кандидата (с участием B.AI Qwen 3.8 Flash, если задан ключ)
-    candidates = synthesize_candidates(
+    candidates = await synthesize_candidates(
         target=target,
         link=link,
         with_link=with_link,
@@ -294,7 +280,7 @@ def generate_offer(
     )
 
     # Запрашиваем у Jev выбор лучшего кандидата
-    jev_decision = select_best_with_jev(candidates, target=target, api_key=api_key)
+    jev_decision = await select_best_with_jev(candidates, target=target, api_key=api_key)
 
     winner_id = strategy_id
     if jev_decision and jev_decision.get("choice"):
@@ -322,7 +308,9 @@ def generate_offer(
     candidate_cards.sort(key=lambda x: x["probability"], reverse=True)
 
     # Классифицируем выбранный оффер
-    classification = classify_offer(winner_cand["text"], target=target, with_link=with_link, api_key=api_key)
+    classification = await classify_offer(
+        winner_cand["text"], target=target, with_link=with_link, api_key=api_key
+    )
 
     return {
         "strategy": winner_id,
@@ -492,7 +480,7 @@ def _evaluate_antispam_and_risk(raw_text: str, with_link: bool = False) -> tuple
     return max(0, score), notes
 
 
-def _call_typesafe_jev(
+async def _call_typesafe_jev(
     text: str, target: dict[str, Any] | None = None, api_key: str = ""
 ) -> dict[str, Any] | None:
     """Вызов TypeSafe Jev API для классификации оффера через систему решений Jev."""
@@ -523,54 +511,46 @@ def _call_typesafe_jev(
         },
     }
 
-    # Повторы на обрыв связи (характерно для провайдера)
-    for attempt in range(3):
-        try:
-            req = urllib.request.Request(
-                TYPESAFE_URL,
-                data=json.dumps(body).encode("utf-8"),
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {key}",
-                    "User-Agent": "FindClient-CRM/2.0",
-                },
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=12) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                ans = data.get("answers", {}).get("verdict", {})
-                choice = ans.get("choice", "")
-                probs = ans.get("probabilities", {})
-                confidence = float(ans.get("confidence", 0.5))
+    data = await post_json(
+        TYPESAFE_URL,
+        body,
+        {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {key}",
+            "User-Agent": "FindClient-CRM/2.0",
+        },
+    )
+    if not data:
+        return None
 
-                weighted = (
-                    probs.get("EXCELLENT", 0.0) * 96
-                    + probs.get("GOOD", 0.0) * 80
-                    + probs.get("NEEDS_WORK", 0.0) * 55
-                    + probs.get("SPAM_RISK", 0.0) * 20
-                )
-                ai_score = int(round(weighted)) if probs else (
-                    90 if choice == "EXCELLENT" else 75 if choice == "GOOD" else 55
-                )
+    ans = data.get("answers", {}).get("verdict", {})
+    choice = ans.get("choice", "")
+    probs = ans.get("probabilities", {})
+    confidence = float(ans.get("confidence", 0.5))
 
-                return {
-                    "choice": choice,
-                    "score": ai_score,
-                    "confidence": confidence,
-                    "probabilities": probs,
-                    "summary": (
-                        f"Jev ({data.get('model', 'decision')}): вердикт {choice}"
-                        f" (уверенность {int(confidence * 100)}%)"
-                    ),
-                }
-        except Exception as exc:
-            log.debug("TypeSafe Jev attempt %d failed: %s", attempt + 1, exc)
-            if attempt < 2:
-                time.sleep(0.5 * (attempt + 1))
-    return None
+    weighted = (
+        probs.get("EXCELLENT", 0.0) * 96
+        + probs.get("GOOD", 0.0) * 80
+        + probs.get("NEEDS_WORK", 0.0) * 55
+        + probs.get("SPAM_RISK", 0.0) * 20
+    )
+    ai_score = int(round(weighted)) if probs else (
+        90 if choice == "EXCELLENT" else 75 if choice == "GOOD" else 55
+    )
+
+    return {
+        "choice": choice,
+        "score": ai_score,
+        "confidence": confidence,
+        "probabilities": probs,
+        "summary": (
+            f"Jev ({data.get('model', 'decision')}): вердикт {choice}"
+            f" (уверенность {int(confidence * 100)}%)"
+        ),
+    }
 
 
-def classify_offer(
+async def classify_offer(
     text: str,
     target: dict[str, Any] | None = None,
     with_link: bool = False,
@@ -589,7 +569,7 @@ def classify_offer(
     recommendations = notes1 + notes2 + notes3 + notes4
 
     # Запрашиваем TypeSafe Jev API
-    ai_result = _call_typesafe_jev(clean_text, target, api_key=api_key)
+    ai_result = await _call_typesafe_jev(clean_text, target, api_key=api_key)
 
     if ai_result and "score" in ai_result:
         ai_score = int(ai_result.get("score", rules_score))
@@ -650,7 +630,7 @@ def classify_offer(
     }
 
 
-def auto_improve_offer(
+async def auto_improve_offer(
     text: str,
     target: dict[str, Any] | None = None,
     api_key: str = "",
@@ -667,7 +647,7 @@ def auto_improve_offer(
     burl = bai_url or os.environ.get("BAI_BASE_URL", "") or BAI_BASE_URL
     if bkey:
         try:
-            bai_humanized = bai.humanize_with_bai(
+            bai_humanized = await bai.humanize_with_bai(
                 text=text,
                 target=target,
                 api_key=bkey,
@@ -730,7 +710,7 @@ def auto_improve_offer(
     ]
 
     # Спрашиваем Jev, какой из рерайтов сильнее
-    jev_choice = select_best_with_jev(alt_rewrites, target=target, api_key=api_key)
+    jev_choice = await select_best_with_jev(alt_rewrites, target=target, api_key=api_key)
     if jev_choice and jev_choice.get("choice"):
         winner = next((r for r in alt_rewrites if r["id"] == jev_choice["choice"]), alt_rewrites[0])
         return winner["text"]

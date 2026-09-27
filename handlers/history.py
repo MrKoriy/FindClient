@@ -9,7 +9,7 @@ from aiogram.types import CallbackQuery, Message
 from db.database import Database
 from handlers.common import BACK_TO_MENU, document, kb, plural, safe_edit
 from models.organization import Organization
-from services.export import ORG_COLUMNS, export
+from services.export import ORG_COLUMNS, export_async
 
 router = Router()
 
@@ -49,6 +49,6 @@ async def on_download(callback: CallbackQuery, db: Database) -> None:
         return
     orgs = [Organization(**r) for r in rows]
     orgs.sort(key=lambda o: o.score, reverse=True)
-    data, ext = export(orgs, ORG_COLUMNS)
+    data, ext = await export_async(orgs, ORG_COLUMNS)
     await callback.message.answer_document(document(data, f"сбор_{callback.data.split(':')[2]}.{ext}"),
                                            caption=plural(len(orgs), "компания", "компании", "компаний"))

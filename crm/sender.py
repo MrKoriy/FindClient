@@ -131,7 +131,7 @@ async def run_once(client, crm_path: str | None = None) -> bool:
     `crm_path` протянут параметром, а не берётся из окружения: иначе воркер
     нельзя ни протестировать на временной базе, ни запустить на другой.
     """
-    settings = crm_db.get_settings(crm_path)
+    settings = await crm_db.get_settings(crm_path)
     if settings.get("enabled") != "1":
         return False
 
@@ -140,14 +140,14 @@ async def run_once(client, crm_path: str | None = None) -> bool:
         return False
 
     cap = int(settings.get("daily_cap", "10"))
-    today = crm_db.sent_today(
+    today = await crm_db.sent_today(
         crm_path, tz_offset=int(settings.get("timezone_offset", "3"))
     )
     if today >= cap:
         log.info("дневной лимит выбран: %s/%s", today, cap)
         return False
 
-    message = crm_db.next_queued(crm_path)
+    message = await crm_db.next_queued(crm_path)
     if not message:
         return False
 
@@ -160,7 +160,7 @@ async def run_once(client, crm_path: str | None = None) -> bool:
         log.warning("  -> %s %s (остаётся в очереди)", status, error)
         await asyncio.sleep(FLOOD_RETRY_PAUSE)
         return True
-    crm_db.mark_message(message["id"], status, error, tg_id, crm_path)
+    await crm_db.mark_message(message["id"], status, error, tg_id, crm_path)
     log.info("  -> %s %s", status, error)
 
     if status == "sent":
@@ -181,7 +181,7 @@ async def main() -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
-    crm_db.init_db()
+    await crm_db.init_db()
     client = make_client()
     await client.connect()
     if not await client.is_user_authorized():

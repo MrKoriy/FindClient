@@ -12,7 +12,7 @@ from aiogram.types import CallbackQuery, Message
 from data.niches import NICHES, get_niche
 from db.database import Database
 from handlers.common import BACK_TO_MENU, Progress, check, document, grid, kb, safe_edit
-from services.export import TG_LEAD_COLUMNS, export
+from services.export import TG_LEAD_COLUMNS, export_async
 from services.telegram_service import TelegramUserService, harvest_channels
 
 log = logging.getLogger(__name__)
@@ -106,7 +106,7 @@ async def _harvest(message: Message, chats: list[str], label: str, tg: TelegramU
             f"• {html.escape(who)} — {html.escape(lead.name[:40])} ({lead.messages} сообщ., {lead.score})"
         )
     await status.edit_text("\n".join(lines), parse_mode="HTML")
-    data, ext = export(leads, TG_LEAD_COLUMNS, title="Telegram-лиды")
+    data, ext = await export_async(leads, TG_LEAD_COLUMNS, title="Telegram-лиды")
     await message.answer_document(document(data, f"tg_{label}_{len(leads)}.{ext}"), caption="Лиды из Telegram")
 
 
@@ -186,7 +186,7 @@ async def on_search_keywords(message: Message, state: FSMContext, tg_service: Te
                                             [("⬅️ Назад", "menu:tg")]]))
     if found:
         rows = [{**c, "link": f"https://t.me/{c['username']}"} for c in found]
-        data, ext = export(rows, _CHAT_COLUMNS, title="Чаты")
+        data, ext = await export_async(rows, _CHAT_COLUMNS, title="Чаты")
         await message.answer_document(document(data, f"чаты_{len(found)}.{ext}"))
 
 

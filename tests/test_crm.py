@@ -8,6 +8,7 @@ import importlib.util
 import sqlite3
 
 import pytest
+import pytest_asyncio
 
 from crm import db as crm_db
 from crm import templates as tpl
@@ -21,10 +22,10 @@ needs_telethon = pytest.mark.skipif(
 )
 
 
-@pytest.fixture()
-def crm_path(tmp_path):
+@pytest_asyncio.fixture
+async def crm_path(tmp_path):
     path = str(tmp_path / "crm.db")
-    crm_db.init_db(path)
+    await crm_db.init_db(path)
     return path
 
 
@@ -157,154 +158,170 @@ def test_pick_variant_changes_greeting_deterministically():
 
 # ---------------------------------------------------------------- БД и цели
 
-def test_init_db_is_idempotent(crm_path):
-    crm_db.init_db(crm_path)
-    crm_db.init_db(crm_path)
-    with crm_db.connect(crm_path) as conn:
-        tables = {r[0] for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'")}
+@pytest.mark.asyncio
+async def test_init_db_is_idempotent(crm_path):
+    await crm_db.init_db(crm_path)
+    await crm_db.init_db(crm_path)
+    async with crm_db.connect(crm_path) as conn:
+        cur = await conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = {r[0] for r in await cur.fetchall()}
     assert {"targets", "messages", "templates", "groups", "settings"} <= tables
 
 
-def test_import_targets_skips_companies_with_website(crm_path, scraper_path):
-    added = crm_db.import_targets(scraper_path, crm_path)
+@pytest.mark.asyncio
+async def test_import_targets_skips_companies_with_website(crm_path, scraper_path):
+    added = await crm_db.import_targets(scraper_path, crm_path)
     assert added == 3
-    counts = crm_db.count_targets(crm_path)
+    counts = await crm_db.count_targets(crm_path)
     assert counts["new"] == 2, "две компании без сайта должны стать рабочими целями"
     assert counts["skip"] == 1, "компания с сайтом помечается skip"
     assert counts["all"] == 3
 
 
-def test_import_targets_is_idempotent(crm_path, scraper_path):
-    crm_db.import_targets(scraper_path, crm_path)
-    again = crm_db.import_targets(scraper_path, crm_path)
+@pytest.mark.asyncio
+async def test_import_targets_is_idempotent(crm_path, scraper_path):
+    await crm_db.import_targets(scraper_path, crm_path)
+    again = await crm_db.import_targets(scraper_path, crm_path)
     assert again == 0
-    assert crm_db.count_targets(crm_path)["all"] == 3
+    assert (await crm_db.count_targets(crm_path))["all"] == 3
 
 
-def test_import_targets_reports_missing_db(crm_path):
+@pytest.mark.asyncio
+async def test_import_targets_reports_missing_db(crm_path):
     with pytest.raises(FileNotFoundError):
-        crm_db.import_targets("/nope/scraper.db", crm_path)
+        await crm_db.import_targets("/nope/scraper.db", crm_path)
 
 
-def test_set_target_status_rejects_unknown(crm_path, scraper_path):
-    crm_db.import_targets(scraper_path, crm_path)
-    target = crm_db.list_targets(status="new", crm_db=crm_path)[0]
+@pytest.mark.asyncio
+async def test_set_target_status_rejects_unknown(crm_path, scraper_path):
+    await crm_db.import_targets(scraper_path, crm_path)
+    target = (await crm_db.list_targets(status="new", crm_db=crm_path))[0]
     with pytest.raises(ValueError):
-        crm_db.set_target_status(target["id"], "выдуманный", crm_db=crm_path)
+        await crm_db.set_target_status(target["id"], "выдуманный", crm_db=crm_path)
 
 
-def test_target_filters(crm_path, scraper_path):
-    crm_db.import_targets(scraper_path, crm_path)
-    spb = crm_db.list_targets(city="Санкт-Петербург", crm_db=crm_path)
+@pytest.mark.asyncio
+async def test_target_filters(crm_path, scraper_path):
+    await crm_db.import_targets(scraper_path, crm_path)
+    spb = await crm_db.list_targets(city="Санкт-Петербург", crm_db=crm_path)
     assert len(spb) == 2
-    found = crm_db.list_targets(search="стоматология", crm_db=crm_path)
+    found = await crm_db.list_targets(search="стоматология", crm_db=crm_path)
     assert len(found) == 1 and found[0]["name"] == "Тоже без сайта"
 
 
 # ---------------------------------------------------------------- очередь
 
-def test_queue_requires_recipient(crm_path, scraper_path):
+@pytest.mark.asyncio
+async def test_queue_requires_recipient(crm_path, scraper_path):
     """Цель без юзернейма в личку не поставить: Телеграм по телефону не пишет."""
-    crm_db.import_targets(scraper_path, crm_path)
-    target = crm_db.list_targets(status="new", crm_db=crm_path)[0]
+    await crm_db.import_targets(scraper_path, crm_path)
+    target = (await crm_db.list_targets(status="new", crm_db=crm_path))[0]
     assert target["username"] == ""
 
-    crm_db.save_target_username(target["id"], "@someuser", crm_db=crm_path)
-    assert crm_db.get_target(target["id"], crm_path)["username"] == "someuser"
+    await crm_db.save_target_username(target["id"], "@someuser", crm_db=crm_path)
+    assert (await crm_db.get_target(target["id"], crm_path))["username"] == "someuser"
 
 
-def test_queue_message_moves_target_to_queued(crm_path, scraper_path):
-    crm_db.import_targets(scraper_path, crm_path)
-    target = crm_db.list_targets(status="new", crm_db=crm_path)[0]
-    crm_db.queue_message(target["id"], "someuser", "Здравствуйте!", crm_db=crm_path)
+@pytest.mark.asyncio
+async def test_queue_message_moves_target_to_queued(crm_path, scraper_path):
+    await crm_db.import_targets(scraper_path, crm_path)
+    target = (await crm_db.list_targets(status="new", crm_db=crm_path))[0]
+    await crm_db.queue_message(target["id"], "someuser", "Здравствуйте!", crm_db=crm_path)
 
-    assert crm_db.get_target(target["id"], crm_path)["status"] == "queued"
-    queued = crm_db.next_queued(crm_path)
+    assert (await crm_db.get_target(target["id"], crm_path))["status"] == "queued"
+    queued = await crm_db.next_queued(crm_path)
     assert queued["chat"] == "someuser"
 
 
-def test_mark_message_sent_updates_target_and_counter(crm_path, scraper_path):
-    crm_db.import_targets(scraper_path, crm_path)
-    target = crm_db.list_targets(status="new", crm_db=crm_path)[0]
-    mid = crm_db.queue_message(target["id"], "someuser", "Привет", crm_db=crm_path)
+@pytest.mark.asyncio
+async def test_mark_message_sent_updates_target_and_counter(crm_path, scraper_path):
+    await crm_db.import_targets(scraper_path, crm_path)
+    target = (await crm_db.list_targets(status="new", crm_db=crm_path))[0]
+    mid = await crm_db.queue_message(target["id"], "someuser", "Привет", crm_db=crm_path)
 
-    assert crm_db.sent_today(crm_path) == 0
-    crm_db.mark_message(mid, "sent", tg_id=42, crm_db=crm_path)
+    assert await crm_db.sent_today(crm_path) == 0
+    await crm_db.mark_message(mid, "sent", tg_id=42, crm_db=crm_path)
 
-    assert crm_db.sent_today(crm_path) == 1
-    assert crm_db.get_target(target["id"], crm_path)["status"] == "sent"
-    assert crm_db.next_queued(crm_path) is None
-
-
-def test_mark_message_failed_does_not_count_as_sent(crm_path):
-    mid = crm_db.queue_message(None, "ghost", "текст", crm_db=crm_path)
-    crm_db.mark_message(mid, "failed", "FloodWait 900 с", crm_db=crm_path)
-    assert crm_db.sent_today(crm_path) == 0
-    assert crm_db.summary(crm_path)["failed"] == 1
+    assert await crm_db.sent_today(crm_path) == 1
+    assert (await crm_db.get_target(target["id"], crm_path))["status"] == "sent"
+    assert await crm_db.next_queued(crm_path) is None
 
 
-def test_summary_counts_left_today(crm_path):
-    crm_db.set_settings({"daily_cap": "3"}, crm_path)
+@pytest.mark.asyncio
+async def test_mark_message_failed_does_not_count_as_sent(crm_path):
+    mid = await crm_db.queue_message(None, "ghost", "текст", crm_db=crm_path)
+    await crm_db.mark_message(mid, "failed", "FloodWait 900 с", crm_db=crm_path)
+    assert await crm_db.sent_today(crm_path) == 0
+    assert (await crm_db.summary(crm_path))["failed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_summary_counts_left_today(crm_path):
+    await crm_db.set_settings({"daily_cap": "3"}, crm_path)
     for i in range(2):
-        mid = crm_db.queue_message(None, f"u{i}", "текст", crm_db=crm_path)
-        crm_db.mark_message(mid, "sent", crm_db=crm_path)
-    s = crm_db.summary(crm_path)
+        mid = await crm_db.queue_message(None, f"u{i}", "текст", crm_db=crm_path)
+        await crm_db.mark_message(mid, "sent", crm_db=crm_path)
+    s = await crm_db.summary(crm_path)
     assert s["sent_today"] == 2
     assert s["left_today"] == 1
     assert s["daily_cap"] == 3
 
 
-def test_summary_never_goes_negative(crm_path):
-    crm_db.set_settings({"daily_cap": "1"}, crm_path)
+@pytest.mark.asyncio
+async def test_summary_never_goes_negative(crm_path):
+    await crm_db.set_settings({"daily_cap": "1"}, crm_path)
     for i in range(4):
-        mid = crm_db.queue_message(None, f"u{i}", "текст", crm_db=crm_path)
-        crm_db.mark_message(mid, "sent", crm_db=crm_path)
-    assert crm_db.summary(crm_path)["left_today"] == 0
+        mid = await crm_db.queue_message(None, f"u{i}", "текст", crm_db=crm_path)
+        await crm_db.mark_message(mid, "sent", crm_db=crm_path)
+    assert (await crm_db.summary(crm_path))["left_today"] == 0
 
 
 # ---------------------------------------------------------------- группы
 
-def test_import_groups_and_mark_posted(crm_path):
+@pytest.mark.asyncio
+async def test_import_groups_and_mark_posted(crm_path):
     from data.niches import NICHES
 
-    added = crm_db.import_groups(crm_path, niches_module=NICHES)
+    added = await crm_db.import_groups(crm_path, niches_module=NICHES)
     assert added > 0
-    groups = crm_db.list_groups(crm_db=crm_path)
+    groups = await crm_db.list_groups(crm_db=crm_path)
     assert len(groups) == added
 
-    crm_db.mark_group_posted(groups[0]["id"], "опубликовано вручную", crm_path)
-    posted = [g for g in crm_db.list_groups(crm_db=crm_path) if g["posted_at"]]
+    await crm_db.mark_group_posted(groups[0]["id"], "опубликовано вручную", crm_path)
+    posted = [g for g in await crm_db.list_groups(crm_db=crm_path) if g["posted_at"]]
     assert len(posted) == 1
     assert posted[0]["posts"] == 1
-    assert crm_db.summary(crm_path)["groups_posted"] == 1
+    assert (await crm_db.summary(crm_path))["groups_posted"] == 1
 
 
-def test_import_groups_is_idempotent(crm_path):
+@pytest.mark.asyncio
+async def test_import_groups_is_idempotent(crm_path):
     from data.niches import NICHES
 
-    first = crm_db.import_groups(crm_path, niches_module=NICHES)
-    second = crm_db.import_groups(crm_path, niches_module=NICHES)
+    first = await crm_db.import_groups(crm_path, niches_module=NICHES)
+    second = await crm_db.import_groups(crm_path, niches_module=NICHES)
     assert first > 0 and second == 0
 
 
 # ---------------------------------------------------------------- настройки
 
-def test_settings_defaults_and_override(crm_path):
-    settings = crm_db.get_settings(crm_path)
+@pytest.mark.asyncio
+async def test_settings_defaults_and_override(crm_path):
+    settings = await crm_db.get_settings(crm_path)
     assert settings["daily_cap"] == "10"
     assert settings["enabled"] == "0", "отправка по умолчанию выключена"
     assert settings["dry_run"] == "1", "по умолчанию холостой ход"
 
-    crm_db.set_settings({"daily_cap": "5"}, crm_path)
-    assert crm_db.get_settings(crm_path)["daily_cap"] == "5"
-    assert crm_db.get_settings(crm_path)["enabled"] == "0"
+    await crm_db.set_settings({"daily_cap": "5"}, crm_path)
+    assert (await crm_db.get_settings(crm_path))["daily_cap"] == "5"
+    assert (await crm_db.get_settings(crm_path))["enabled"] == "0"
 
 
-def test_settings_survive_reinit(crm_path):
-    crm_db.set_settings({"daily_cap": "7"}, crm_path)
-    crm_db.init_db(crm_path)
-    assert crm_db.get_settings(crm_path)["daily_cap"] == "7"
+@pytest.mark.asyncio
+async def test_settings_survive_reinit(crm_path):
+    await crm_db.set_settings({"daily_cap": "7"}, crm_path)
+    await crm_db.init_db(crm_path)
+    assert (await crm_db.get_settings(crm_path))["daily_cap"] == "7"
 
 
 # ---------------------------------------------------------------- воркер
@@ -323,80 +340,80 @@ class FakeClient:
         return type("M", (), {"id": 1})()
 
 
-def test_sender_does_nothing_when_disabled(crm_path):
-    import asyncio
+@pytest.mark.asyncio
+async def test_sender_does_nothing_when_disabled(crm_path):
 
     from crm import sender
 
-    crm_db.queue_message(None, "ghost", "текст", crm_db=crm_path)
-    assert asyncio.run(sender.run_once(FakeClient(), crm_path)) is False
+    await crm_db.queue_message(None, "ghost", "текст", crm_db=crm_path)
+    assert await sender.run_once(FakeClient(), crm_path) is False
 
 
-def test_sender_dry_run_does_not_send(crm_path):
-    import asyncio
+@pytest.mark.asyncio
+async def test_sender_dry_run_does_not_send(crm_path):
 
     from crm import sender
 
-    crm_db.set_settings(
+    await crm_db.set_settings(
         {"enabled": "1", "dry_run": "1", "work_from": "0", "work_to": "24"}, crm_path
     )
-    crm_db.queue_message(None, "someone", "текст", crm_db=crm_path)
+    await crm_db.queue_message(None, "someone", "текст", crm_db=crm_path)
 
     client = FakeClient()
-    assert asyncio.run(sender.run_once(client, crm_path)) is True
+    assert await sender.run_once(client, crm_path) is True
     assert client.sent == [], "в холостом режиме отправлять нельзя"
-    assert crm_db.sent_today(crm_path) == 0
-    assert crm_db.list_messages(crm_db=crm_path)[0]["status"] == "skipped"
+    assert await crm_db.sent_today(crm_path) == 0
+    assert (await crm_db.list_messages(crm_db=crm_path))[0]["status"] == "skipped"
 
 
 @needs_telethon
-def test_sender_respects_daily_cap(crm_path):
-    import asyncio
+@pytest.mark.asyncio
+async def test_sender_respects_daily_cap(crm_path):
 
     from crm import sender
 
-    crm_db.set_settings(
+    await crm_db.set_settings(
         {"enabled": "1", "dry_run": "0", "work_from": "0", "work_to": "24",
          "daily_cap": "2", "min_delay": "0", "max_delay": "0"}, crm_path
     )
     for i in range(5):
-        crm_db.queue_message(None, f"user{i}", "текст", crm_db=crm_path)
+        await crm_db.queue_message(None, f"user{i}", "текст", crm_db=crm_path)
 
     client = FakeClient()
-    while asyncio.run(sender.run_once(client, crm_path)):
+    while await sender.run_once(client, crm_path):
         pass
     assert len(client.sent) == 2, "больше дневного лимита уходить не должно"
-    assert crm_db.sent_today(crm_path) == 2
+    assert await crm_db.sent_today(crm_path) == 2
 
 
-def test_sender_skips_outside_work_hours(crm_path):
-    import asyncio
+@pytest.mark.asyncio
+async def test_sender_skips_outside_work_hours(crm_path):
 
     from crm import sender
 
     # Окно, которое гарантированно не содержит текущий час ни в одном поясе.
-    crm_db.set_settings(
+    await crm_db.set_settings(
         {"enabled": "1", "dry_run": "0", "work_from": "0", "work_to": "0"}, crm_path
     )
-    crm_db.queue_message(None, "someone", "текст", crm_db=crm_path)
-    assert asyncio.run(sender.run_once(FakeClient(), crm_path)) is False
-    assert crm_db.sent_today(crm_path) == 0
+    await crm_db.queue_message(None, "someone", "текст", crm_db=crm_path)
+    assert await sender.run_once(FakeClient(), crm_path) is False
+    assert await crm_db.sent_today(crm_path) == 0
 
 
 @needs_telethon
-def test_sender_marks_failure_and_keeps_going(crm_path):
-    import asyncio
+@pytest.mark.asyncio
+async def test_sender_marks_failure_and_keeps_going(crm_path):
 
     from crm import sender
 
-    crm_db.set_settings(
+    await crm_db.set_settings(
         {"enabled": "1", "dry_run": "0", "work_from": "0", "work_to": "24",
          "daily_cap": "10", "min_delay": "0", "max_delay": "0"}, crm_path
     )
-    crm_db.queue_message(None, "", "текст", crm_db=crm_path)
+    await crm_db.queue_message(None, "", "текст", crm_db=crm_path)
 
-    assert asyncio.run(sender.run_once(FakeClient(), crm_path)) is True
-    message = crm_db.list_messages(crm_db=crm_path)[0]
+    assert await sender.run_once(FakeClient(), crm_path) is True
+    message = (await crm_db.list_messages(crm_db=crm_path))[0]
     assert message["status"] == "failed"
     assert "получател" in message["error"]
 
@@ -412,7 +429,8 @@ def test_offer_strategies_list():
     assert {"lost_traffic", "social_only", "ready_concept", "conversion_quiz"} <= ids
 
 
-def test_generate_offer_all_strategies_score_well():
+@pytest.mark.asyncio
+async def test_generate_offer_all_strategies_score_well():
     from crm import offer
 
     sample = {
@@ -423,7 +441,7 @@ def test_generate_offer_all_strategies_score_well():
         "city": "Москва",
     }
     for strat in offer.get_strategies():
-        res = offer.generate_offer(sample, strategy_id=strat["id"])
+        res = await offer.generate_offer(sample, strategy_id=strat["id"])
         text = res["text"]
         cls = res["classification"]
         assert len(text) > 20
@@ -431,14 +449,15 @@ def test_generate_offer_all_strategies_score_well():
         assert cls["verdict"] in ("excellent", "good")
 
 
-def test_classify_penalizes_price_and_long_dash():
+@pytest.mark.asyncio
+async def test_classify_penalizes_price_and_long_dash():
     from crm import offer
 
     bad_text = (
         "Здравствуйте! Предлагаем сайт за 45000 руб. со скидкой \u2014 сделаем быстро. "
         "Интересно? Или перезвонить позже?"
     )
-    res = offer.classify_offer(bad_text)
+    res = await offer.classify_offer(bad_text)
     assert res["score"] < 70
     assert any("цен" in r.lower() or "прайс" in r.lower() for r in res["recommendations"])
     assert any("тире" in r.lower() for r in res["recommendations"])
@@ -448,31 +467,33 @@ def test_classify_penalizes_price_and_long_dash():
     assert res["checks"]["single_question"] is False
 
 
-def test_classify_penalizes_excess_words():
+@pytest.mark.asyncio
+async def test_classify_penalizes_excess_words():
     from crm import offer
 
     long_text = "Здравствуйте! " + "слово " * 55 + "Есть смысл обсудить?"
-    res = offer.classify_offer(long_text)
+    res = await offer.classify_offer(long_text)
     assert any("слов" in r.lower() for r in res["recommendations"])
     assert res["checks"]["under_word_limit"] is False
 
 
-def test_auto_improve_offer_fixes_flaws():
+@pytest.mark.asyncio
+async def test_auto_improve_offer_fixes_flaws():
     from crm import offer
 
     flawed = "Здравствуйте! Сайт стоит 30000 руб - сделаем быстро. Показать? Или перезвонить?"
-    improved = offer.auto_improve_offer(flawed)
+    improved = await offer.auto_improve_offer(flawed)
     # Спейс-дефис - след заменённого длинного тире; дефис внутри «демо-версию» законен.
     assert " - " not in improved
     assert "30000" not in improved
     assert improved.count("?") == 1
-    res = offer.classify_offer(improved)
+    res = await offer.classify_offer(improved)
     assert res["checks"]["no_em_dash"] is True
     assert res["checks"]["single_question"] is True
 
 
-def test_offer_api_endpoints(crm_path, scraper_path, monkeypatch):
-    import asyncio
+@pytest.mark.asyncio
+async def test_offer_api_endpoints(crm_path, scraper_path, monkeypatch):
     import base64
 
     from aiohttp.test_utils import TestClient, TestServer
@@ -482,7 +503,7 @@ def test_offer_api_endpoints(crm_path, scraper_path, monkeypatch):
     monkeypatch.setattr(crm_app, "USER", "admin")
     monkeypatch.setattr(crm_app, "PASSWORD", "secret")
     monkeypatch.setattr(crm_db, "DEFAULT_CRM_DB", crm_path)
-    crm_db.import_targets(scraper_path, crm_path)
+    await crm_db.import_targets(scraper_path, crm_path)
 
     async def _run():
         app = crm_app.create_app()
@@ -497,7 +518,7 @@ def test_offer_api_endpoints(crm_path, scraper_path, monkeypatch):
             assert len(data["items"]) >= 4
 
             # 2. Generate
-            target = crm_db.list_targets(crm_db=crm_path)[0]
+            target = (await crm_db.list_targets(crm_db=crm_path))[0]
             r = await client.post("/api/offer/generate", json={
                 "target_id": target["id"],
                 "strategy_id": "lost_traffic",
@@ -534,7 +555,7 @@ def test_offer_api_endpoints(crm_path, scraper_path, monkeypatch):
             assert "qwen3.8-flash" in model_ids
             assert "deepseek-v4.1-flash" in model_ids
 
-    asyncio.run(_run())
+    await _run()
 
 
 def test_bai_clean_human_output():
@@ -568,8 +589,8 @@ def test_magic_token_and_session_cookie():
     assert auth.verify_session_cookie(cookie, secret="wrong-secret") is None
 
 
-def test_crm_auth_flow(crm_path, monkeypatch):
-    import asyncio
+@pytest.mark.asyncio
+async def test_crm_auth_flow(crm_path, monkeypatch):
 
     from aiohttp.test_utils import TestClient, TestServer
 
@@ -615,7 +636,53 @@ def test_crm_auth_flow(crm_path, monkeypatch):
             r = await client.get("/auth/logout", allow_redirects=False)
             assert r.status == 302
 
-    asyncio.run(_run())
+    await _run()
 
 
 
+
+@pytest.mark.asyncio
+async def test_panel_responsive_during_slow_ai_call(crm_path, monkeypatch):
+    """Панель отвечает на запросы, пока генератор оффера ждёт внешний API.
+
+    Раньше urllib.request из хендлера блокировал цикл на минуты: сводка
+    не отвечала, UI зависал. Теперь вызов асинхронный - это и проверяем.
+    """
+    import asyncio
+    import base64
+
+    from aiohttp.test_utils import TestClient, TestServer
+
+    from crm import app as crm_app
+    from crm import offer as offer_mod
+
+    monkeypatch.setattr(crm_app, "USER", "admin")
+    monkeypatch.setattr(crm_app, "PASSWORD", "secret")
+    monkeypatch.setattr(crm_db, "DEFAULT_CRM_DB", crm_path)
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_improve(*args, **kwargs):
+        started.set()
+        await release.wait()
+        return "Здравствуйте! Улучшенный текст без спама. Взглянете?"
+
+    monkeypatch.setattr(offer_mod, "auto_improve_offer", slow_improve)
+
+    auth = base64.b64encode(b"admin:secret").decode("utf-8")
+    headers = {"Authorization": f"Basic {auth}"}
+
+    app = crm_app.create_app()
+    async with TestClient(TestServer(app), headers=headers) as client:
+        improve = asyncio.create_task(
+            client.post("/api/offer/improve", json={"text": "текст"})
+        )
+        await asyncio.wait_for(started.wait(), timeout=2)
+        r = await asyncio.wait_for(client.get("/api/summary"), timeout=1)
+        assert r.status == 200
+        release.set()
+        resp = await improve
+        assert resp.status == 200
+        data = await resp.json()
+        assert data["text"].startswith("Здравствуйте!")

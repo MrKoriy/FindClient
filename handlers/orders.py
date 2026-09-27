@@ -1,6 +1,8 @@
 """Freelance orders: subscription, sources, keywords, manual check and export."""
 
+import asyncio
 import html
+import logging
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -11,7 +13,7 @@ from aiogram.types import CallbackQuery, Message
 from api.orders import DEFAULT_KEYWORDS, DEFAULT_TG_CHANNELS
 from db.database import Database
 from handlers.common import BACK_TO_MENU, check, document, kb, plural, safe_edit
-from services.export import ORDER_COLUMNS, export
+from services.export import ORDER_COLUMNS, export_async
 from services.orders_service import (
     ALL_SOURCES,
     ENABLED,
@@ -23,7 +25,29 @@ from services.orders_service import (
     format_order,
 )
 
+log = logging.getLogger(__name__)
 router = Router()
+
+# Ручные проверки/первые опросы уходят в фон: полный проход 6 источников
+# с таймаутом в 40 секунд нельзя держать внутри колбэка кнопки.
+_poll_tasks: dict[int, asyncio.Task] = {}
+
+
+def _spawn_poll(chat_id: int, coro) -> None:
+    prev = _poll_tasks.get(chat_id)
+    if prev and not prev.done():
+        coro.close()
+        return
+    task = asyncio.create_task(coro)
+    _poll_tasks[chat_id] = task
+    task.add_done_callback(lambda _t: _poll_tasks.pop(chat_id, None))
+
+
+async def _first_poll(chat_id: int, orders_service: OrdersService) -> None:
+    try:
+        await orders_service.poll_once(only_chat=chat_id)
+    except Exception:
+        log.exception("первый опрос заказов для %s не удался", chat_id)
 
 
 class OrdersStates(StatesGroup):
@@ -91,7 +115,7 @@ async def on_toggle(callback: CallbackQuery, orders_service: OrdersService, db: 
     text, markup = await _panel(chat_id, orders_service, db)
     await safe_edit(callback, text, markup, parse_mode="HTML", disable_web_page_preview=True)
     if enabled:
-        await orders_service.poll_once(only_chat=chat_id)
+        _spawn_poll(chat_id, _first_poll(chat_id, orders_service))
 
 
 @router.callback_query(F.data.startswith("or:src:"))
@@ -157,25 +181,42 @@ async def on_channels(message: Message, state: FSMContext, orders_service: Order
     await cmd_orders(message, orders_service, db)
 
 
+async def _run_manual_check(chat_id: int, status: Message, orders_service: OrdersService) -> None:
+    """Ручная проверка в фоне: статусное сообщение редактируется по готовности."""
+    try:
+        cfg = await orders_service.chat_config(chat_id)
+        if not cfg["enabled"]:
+            # One-off check without subscribing: show matches without marking the feed consumed.
+            from api.orders import matches
+
+            orders = await orders_service.fetch_all(set(cfg["sources"]), set(cfg["tg_channels"]))
+            hits = [o for o in orders if matches(o, cfg["keywords"], cfg["minus"])][:10]
+            await status.edit_text(
+                f"Найдено подходящих заказов: {len(hits)} (показываю до 10). "
+                "Включите автопоиск, чтобы получать новые автоматически."
+            )
+            for o in hits:
+                await status.answer(format_order(o), parse_mode="HTML", disable_web_page_preview=True)
+            return
+        sent = await orders_service.poll_once(only_chat=chat_id)
+        n = len(sent.get(chat_id, []))
+        await status.edit_text(
+            f"Готово. Новых подходящих заказов: {n}." if n else "Новых подходящих заказов пока нет."
+        )
+    except Exception:
+        log.exception("ручная проверка заказов для %s не удалась", chat_id)
+        try:
+            await status.edit_text("Не удалось проверить источники — попробуйте позже.")
+        except Exception:
+            pass
+
+
 @router.callback_query(F.data == "or:check")
-async def on_check(callback: CallbackQuery, orders_service: OrdersService, db: Database) -> None:
+async def on_check(callback: CallbackQuery, orders_service: OrdersService) -> None:
     await callback.answer("Проверяю источники…")
     chat_id = callback.message.chat.id
     status = await callback.message.answer("🔄 Проверяю биржи и каналы…")
-    cfg = await orders_service.chat_config(chat_id)
-    if not cfg["enabled"]:
-        # One-off check without subscribing: show matches without marking the feed consumed.
-        from api.orders import matches
-        orders = await orders_service.fetch_all(set(cfg["sources"]), set(cfg["tg_channels"]))
-        hits = [o for o in orders if matches(o, cfg["keywords"], cfg["minus"])][:10]
-        await status.edit_text(f"Найдено подходящих заказов: {len(hits)} (показываю до 10). "
-                               "Включите автопоиск, чтобы получать новые автоматически.")
-        for o in hits:
-            await callback.message.answer(format_order(o), parse_mode="HTML", disable_web_page_preview=True)
-        return
-    sent = await orders_service.poll_once(only_chat=chat_id)
-    n = len(sent.get(chat_id, []))
-    await status.edit_text(f"Готово. Новых подходящих заказов: {n}." if n else "Новых подходящих заказов пока нет.")
+    _spawn_poll(chat_id, _run_manual_check(chat_id, status, orders_service))
 
 
 @router.callback_query(F.data == "or:export")
@@ -185,7 +226,7 @@ async def on_export(callback: CallbackQuery, db: Database) -> None:
     if not rows:
         await callback.message.answer("Пока нет сохранённых подходящих заказов.")
         return
-    data, ext = export(rows, ORDER_COLUMNS, title="Заказы")
+    data, ext = await export_async(rows, ORDER_COLUMNS, title="Заказы")
     await callback.message.answer_document(
         document(data, f"заказы.{ext}"),
         caption=plural(len(rows), "заказ", "заказа", "заказов"),

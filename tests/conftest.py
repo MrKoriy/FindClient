@@ -22,10 +22,14 @@ async def db(tmp_path):
 @pytest.fixture(autouse=True)
 def _mock_crm_network(monkeypatch):
     """Тесты CRM не ходят в TypeSafe/B.AI: остаётся детерминированный rules-движок."""
+
+    async def _none(*args, **kwargs):
+        return None
+
     from crm import bai, offer
 
-    monkeypatch.setattr(offer, "select_best_with_jev", lambda *a, **k: None)
-    monkeypatch.setattr(offer, "_call_typesafe_jev", lambda *a, **k: None)
-    monkeypatch.setattr(bai, "call_bai_chat", lambda *a, **k: None)
-    monkeypatch.setattr(bai, "generate_bai_offer", lambda *a, **k: None)
-    monkeypatch.setattr(bai, "humanize_with_bai", lambda *a, **k: None)
+    monkeypatch.setattr(offer, "select_best_with_jev", _none)
+    monkeypatch.setattr(offer, "_call_typesafe_jev", _none)
+    monkeypatch.setattr(bai, "call_bai_chat", _none)
+    monkeypatch.setattr(bai, "generate_bai_offer", _none)
+    monkeypatch.setattr(bai, "humanize_with_bai", _none)

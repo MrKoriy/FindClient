@@ -1,5 +1,6 @@
 """Table export: styled XLSX (default) and Excel-friendly CSV."""
 
+import asyncio
 import csv
 import io
 from collections.abc import Sequence
@@ -116,3 +117,14 @@ def export(items: Sequence[Any], columns: list[Column], fmt: str = "xlsx", title
     if fmt == "csv":
         return to_csv(items, columns), "csv"
     return to_xlsx(items, columns, title=title), "xlsx"
+
+
+async def export_async(
+    items: Sequence[Any], columns: list[Column], fmt: str = "xlsx", title: str = "Лиды"
+) -> tuple[bytes, str]:
+    """Экспорт без блокировки цикла событий: XLSX строится и пишется в потоке.
+
+    На 500-1000 строках стилизация и wb.save занимают секунды - за это время
+    бот не должен замирать для всех остальных.
+    """
+    return await asyncio.to_thread(export, items, columns, fmt, title)

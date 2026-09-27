@@ -12,7 +12,7 @@ from api.twogis_client import TwoGISClient
 from api.yandex_client import YandexMapsClient
 from db.database import Database
 from models.organization import Organization
-from services.export import ORG_COLUMNS, export, to_csv
+from services.export import ORG_COLUMNS, export_async, to_csv
 
 log = logging.getLogger(__name__)
 
@@ -78,8 +78,9 @@ class ScrapeResult:
     def csv_bytes(self) -> bytes:
         return to_csv(self.organizations, ORG_COLUMNS)
 
-    def file(self, fmt: str = "xlsx") -> tuple[bytes, str]:
-        return export(self.organizations, ORG_COLUMNS, fmt=fmt)
+    async def file(self, fmt: str = "xlsx") -> tuple[bytes, str]:
+        """Экспорт уходит в поток, чтобы не блокировать цикл на больших сборах."""
+        return await export_async(self.organizations, ORG_COLUMNS, fmt=fmt)
 
 
 def _merge_into(base: Organization, other: Organization) -> None:

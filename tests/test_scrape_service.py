@@ -117,7 +117,7 @@ class TestScrapeService:
     @pytest.mark.asyncio
     async def test_result_file_formats(self, db):
         r = await _run(db, ScrapeRequest(queries=("кафе",)), two=[_org(1)])
-        data, ext = r.file("xlsx")
+        data, ext = await r.file("xlsx")
         assert ext == "xlsx" and data[:2] == b"PK"
-        data, ext = r.file("csv")
+        data, ext = await r.file("csv")
         assert ext == "csv" and data[:3] == b"\xef\xbb\xbf"

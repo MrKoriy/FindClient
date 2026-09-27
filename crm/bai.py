@@ -13,16 +13,14 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
-import time
-import urllib.error
-import urllib.request
 from typing import Any
 
 from dotenv import load_dotenv
+
+from crm.http import post_json
 
 load_dotenv()
 load_dotenv("crm.env")
@@ -113,7 +111,7 @@ def clean_human_output(text: str) -> str:
     return cleaned.strip()
 
 
-def call_bai_chat(
+async def call_bai_chat(
     messages: list[dict[str, str]],
     model: str = "",
     api_key: str = "",
@@ -122,7 +120,7 @@ def call_bai_chat(
     max_tokens: int = 1200,
     attempts: int = 3,
 ) -> str | None:
-    """Отправляет запрос в B.AI OpenAI-совместимый API с авто-повторами."""
+    """Запрос в B.AI OpenAI-совместимый API с авто-повторами (без блокировки цикла)."""
     key = api_key or os.environ.get("BAI_API_KEY", "") or BAI_DEFAULT_KEY
     if not key:
         log.warning("B.AI API key is missing")
@@ -137,7 +135,6 @@ def call_bai_chat(
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
-    data_bytes = json.dumps(payload).encode("utf-8")
 
     headers = {
         "Authorization": f"Bearer {key}",
@@ -145,26 +142,18 @@ def call_bai_chat(
         "User-Agent": "FindClient-CRM/2.0 (B.AI Client)",
     }
 
-    for attempt in range(attempts):
-        try:
-            req = urllib.request.Request(url, data=data_bytes, headers=headers, method="POST")
-            with urllib.request.urlopen(req, timeout=50) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                choices = data.get("choices", [])
-                if choices:
-                    msg = choices[0].get("message", {})
-                    content = msg.get("content", "")
-                    if content:
-                        return clean_human_output(content)
-        except Exception as exc:
-            log.warning("B.AI attempt %d/%d failed (%s): %s", attempt + 1, attempts, model_name, exc)
-            if attempt < attempts - 1:
-                time.sleep(1.0 * (attempt + 1))
-
+    data = await post_json(url, payload, headers, attempts=attempts, timeout=50.0)
+    if not data:
+        return None
+    choices = data.get("choices", [])
+    if choices:
+        content = choices[0].get("message", {}).get("content", "")
+        if content:
+            return clean_human_output(content)
     return None
 
 
-def generate_bai_offer(
+async def generate_bai_offer(
     target: dict[str, Any] | None = None,
     strategy_id: str = "lost_traffic",
     prompt_hint: str = "",
@@ -214,10 +203,10 @@ def generate_bai_offer(
         {"role": "user", "content": user_prompt},
     ]
 
-    return call_bai_chat(messages, model=model, api_key=api_key, base_url=base_url)
+    return await call_bai_chat(messages, model=model, api_key=api_key, base_url=base_url)
 
 
-def humanize_with_bai(
+async def humanize_with_bai(
     text: str,
     target: dict[str, Any] | None = None,
     api_key: str = "",
@@ -247,4 +236,6 @@ def humanize_with_bai(
         {"role": "user", "content": user_prompt},
     ]
 
-    return call_bai_chat(messages, model=model, api_key=api_key, base_url=base_url, temperature=0.5)
+    return await call_bai_chat(
+        messages, model=model, api_key=api_key, base_url=base_url, temperature=0.5
+    )

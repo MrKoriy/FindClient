@@ -10,7 +10,7 @@ from aiogram.types import CallbackQuery, Message
 from data.niches import CATEGORIES, NICHES, get_niche, niches_in
 from handlers.common import BACK_TO_MENU, document, grid, kb, safe_edit
 from handlers.scrape import start_with_niche
-from services.export import export
+from services.export import export_async
 
 router = Router()
 
@@ -91,5 +91,5 @@ async def on_export(callback: CallbackQuery) -> None:
     cols = [("category", "Категория", 20), ("label", "Ниша", 34), ("avg_check", "Средний чек, ₽", 22),
             ("turnover", "Оборот/мес, ₽", 16), ("why", "Зачем сайт", 60), ("maps", "На картах", 22),
             ("queries", "Запросы для карт", 50), ("tg", "Telegram-чаты", 50)]
-    data, ext = export(rows, cols, title="Ниши")
+    data, ext = await export_async(rows, cols, title="Ниши")
     await callback.message.answer_document(document(data, f"денежные_ниши.{ext}"), caption=f"{len(NICHES)} ниш")

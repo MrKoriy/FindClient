@@ -9,13 +9,20 @@
 
 Цели импортируются из таблицы `organizations` основной базы: это компании с
 карт. Для рассылки годятся те, у кого нет сайта - им и продаём сайт.
+
+Все функции асинхронные (aiosqlite): панель и воркер зовут их из
+событийного цикла, и дисковый ввод-вывод его не блокирует.
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sqlite3
+from contextlib import asynccontextmanager, suppress
 from typing import Any
+
+import aiosqlite
 
 DEFAULT_CRM_DB = os.environ.get("CRM_DB", "crm.db")
 DEFAULT_SCRAPER_DB = os.environ.get("DB_PATH", "scraper.db")
@@ -145,51 +152,79 @@ DEFAULT_SETTINGS = {
 }
 
 
-def connect(path: str | None = None) -> sqlite3.Connection:
-    conn = sqlite3.connect(path or DEFAULT_CRM_DB, timeout=30)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+@asynccontextmanager
+async def connect(path: str | None = None):
+    """Соединение с транзакцией и гарантированным закрытием.
+
+    В отличие от `sqlite3`, у aiosqlite выход из `async with conn` закрывает
+    соединение, но не коммитит - поэтому коммит делаем явно, а откат - на
+    исключении. Семантика повторяет прежний `with sqlite3.connect(...)`.
+    """
+    conn = await aiosqlite.connect(path or DEFAULT_CRM_DB, timeout=30)
+    try:
+        conn.row_factory = aiosqlite.Row
+        await conn.execute("PRAGMA foreign_keys = ON")
+        yield conn
+        await conn.commit()
+    except BaseException:
+        with suppress(Exception):
+            await conn.rollback()
+        raise
+    finally:
+        await conn.close()
 
 
-def init_db(path: str | None = None) -> None:
+async def init_db(path: str | None = None) -> None:
     """Создаёт схему и дописывает недостающие настройки."""
-    with connect(path) as conn:
-        conn.executescript(SCHEMA)
+    async with connect(path) as conn:
+        await conn.executescript(SCHEMA)
         for key, value in DEFAULT_SETTINGS.items():
-            conn.execute(
+            await conn.execute(
                 "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, value)
             )
 
 
-def get_settings(path: str | None = None) -> dict[str, str]:
-    with connect(path) as conn:
-        rows = conn.execute("SELECT key, value FROM settings").fetchall()
+async def get_settings(path: str | None = None) -> dict[str, str]:
+    async with connect(path) as conn:
+        cur = await conn.execute("SELECT key, value FROM settings")
+        rows = await cur.fetchall()
     out = dict(DEFAULT_SETTINGS)
     out.update({r["key"]: r["value"] for r in rows})
     return out
 
 
-def set_settings(values: dict[str, Any], path: str | None = None) -> None:
-    with connect(path) as conn:
+async def set_settings(values: dict[str, Any], path: str | None = None) -> None:
+    async with connect(path) as conn:
         for key, value in values.items():
-            conn.execute(
+            await conn.execute(
                 "INSERT INTO settings (key, value) VALUES (?, ?) "
                 "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
                 (key, str(value)),
             )
 
 
-def log_event(kind: str, text: str, path: str | None = None) -> None:
-    with connect(path) as conn:
-        conn.execute("INSERT INTO events (kind, text) VALUES (?, ?)", (kind, text))
+async def log_event(kind: str, text: str, path: str | None = None) -> None:
+    async with connect(path) as conn:
+        await conn.execute("INSERT INTO events (kind, text) VALUES (?, ?)", (kind, text))
 
 
 # --------------------------------------------------------------------------
 # Цели
 # --------------------------------------------------------------------------
 
-def import_targets(scraper_db: str | None = None, crm_db: str | None = None) -> int:
+def _read_organizations(scraper_db: str) -> list[sqlite3.Row]:
+    """Синхронное чтение каталога компаний (его выполняем в отдельном потоке)."""
+    src = sqlite3.connect(scraper_db)
+    src.row_factory = sqlite3.Row
+    rows = src.execute(
+        "SELECT org_id, session_id, name, phone, email, website, socials, address,"
+        "       city, category, rating, reviews, source FROM organizations"
+    ).fetchall()
+    src.close()
+    return rows
+
+
+async def import_targets(scraper_db: str | None = None, crm_db: str | None = None) -> int:
     """Подтягивает компании с карт в цели.
 
     Берём только тех, у кого **нет сайта**: им и продаём сайт. Компании с
@@ -200,21 +235,15 @@ def import_targets(scraper_db: str | None = None, crm_db: str | None = None) -> 
     if not os.path.exists(scraper_db):
         raise FileNotFoundError(f"нет основной базы: {scraper_db}")
 
-    src = sqlite3.connect(scraper_db)
-    src.row_factory = sqlite3.Row
-    rows = src.execute(
-        "SELECT org_id, session_id, name, phone, email, website, socials, address,"
-        "       city, category, rating, reviews, source FROM organizations"
-    ).fetchall()
-    src.close()
+    rows = await asyncio.to_thread(_read_organizations, scraper_db)
 
     added = 0
-    with connect(crm_db) as conn:
+    async with connect(crm_db) as conn:
         for r in rows:
             org_key = f"{r['org_id']}|{r['session_id']}"
             has_site = bool((r["website"] or "").strip())
             status = "skip" if has_site else "new"
-            cur = conn.execute(
+            cur = await conn.execute(
                 "INSERT OR IGNORE INTO targets"
                 " (org_key, name, phone, email, website, socials, address, city,"
                 "  category, rating, reviews, source, status)"
@@ -230,7 +259,7 @@ def import_targets(scraper_db: str | None = None, crm_db: str | None = None) -> 
     return added
 
 
-def seed_demo_targets(crm_db: str | None = None) -> int:
+async def seed_demo_targets(crm_db: str | None = None) -> int:
     """Засевает реалистичные цели без сайта для тестирования CRM и генератора офферов."""
     demos = [
         ("demo_1", "Клиника «ДентаЛайн»", "+79991112233", "Москва, ул. Тверская, 12",
@@ -245,9 +274,9 @@ def seed_demo_targets(crm_db: str | None = None) -> int:
          "Санкт-Петербург, пр. Просвещения, 30", "Санкт-Петербург", "ремонт квартир", 4.6, 38, "stroykom_remont"),
     ]
     added = 0
-    with connect(crm_db) as conn:
+    async with connect(crm_db) as conn:
         for org_key, name, phone, addr, city, cat, rating, reviews, username in demos:
-            cur = conn.execute(
+            cur = await conn.execute(
                 "INSERT OR IGNORE INTO targets (org_key, name, phone, address, city, category,"
                 " rating, reviews, username, status) VALUES (?,?,?,?,?,?,?,?,?, 'new')",
                 (org_key, name, phone, addr, city, cat, rating, reviews, username)
@@ -256,16 +285,16 @@ def seed_demo_targets(crm_db: str | None = None) -> int:
     return added
 
 
-def import_groups(crm_db: str | None = None, niches_module=None) -> int:
+async def import_groups(crm_db: str | None = None, niches_module=None) -> int:
     """Заливает проверенный каталог чатов из data/niches.py в таблицу groups."""
     if niches_module is None:
         from data.niches import NICHES as niches_module
 
     added = 0
-    with connect(crm_db) as conn:
+    async with connect(crm_db) as conn:
         for n in niches_module:
             for chat in n.tg_chats:
-                cur = conn.execute(
+                cur = await conn.execute(
                     "INSERT OR IGNORE INTO groups (username, niche) VALUES (?, ?)",
                     (chat, n.label),
                 )
@@ -273,7 +302,7 @@ def import_groups(crm_db: str | None = None, niches_module=None) -> int:
     return added
 
 
-def list_targets(
+async def list_targets(
     status: str | None = None,
     city: str | None = None,
     search: str | None = None,
@@ -295,20 +324,22 @@ def list_targets(
         )
         args += [f"%{search}%"] * 6
     clause = ("WHERE " + " AND ".join(where)) if where else ""
-    with connect(crm_db) as conn:
-        rows = conn.execute(
+    async with connect(crm_db) as conn:
+        cur = await conn.execute(
             f"SELECT * FROM targets {clause} ORDER BY reviews DESC, rating DESC"
             f" LIMIT ? OFFSET ?",
             (*args, limit, offset),
-        ).fetchall()
+        )
+        rows = await cur.fetchall()
     return [dict(r) for r in rows]
 
 
-def count_targets(crm_db: str | None = None) -> dict[str, int]:
-    with connect(crm_db) as conn:
-        rows = conn.execute(
+async def count_targets(crm_db: str | None = None) -> dict[str, int]:
+    async with connect(crm_db) as conn:
+        cur = await conn.execute(
             "SELECT status, count(*) AS n FROM targets GROUP BY status"
-        ).fetchall()
+        )
+        rows = await cur.fetchall()
     out = {s: 0 for s in TARGET_STATUSES}
     for r in rows:
         out[r["status"]] = r["n"]
@@ -316,34 +347,35 @@ def count_targets(crm_db: str | None = None) -> dict[str, int]:
     return out
 
 
-def get_target(target_id: int, crm_db: str | None = None) -> dict | None:
-    with connect(crm_db) as conn:
-        row = conn.execute("SELECT * FROM targets WHERE id = ?", (target_id,)).fetchone()
+async def get_target(target_id: int, crm_db: str | None = None) -> dict | None:
+    async with connect(crm_db) as conn:
+        cur = await conn.execute("SELECT * FROM targets WHERE id = ?", (target_id,))
+        row = await cur.fetchone()
     return dict(row) if row else None
 
 
-def set_target_status(
+async def set_target_status(
     target_id: int, status: str, note: str | None = None, crm_db: str | None = None
 ) -> None:
     if status not in TARGET_STATUSES:
         raise ValueError(f"неизвестный статус: {status}")
-    with connect(crm_db) as conn:
+    async with connect(crm_db) as conn:
         if note is None:
-            conn.execute(
+            await conn.execute(
                 "UPDATE targets SET status = ?, updated_at = datetime('now') WHERE id = ?",
                 (status, target_id),
             )
         else:
-            conn.execute(
+            await conn.execute(
                 "UPDATE targets SET status = ?, note = ?,"
                 " updated_at = datetime('now') WHERE id = ?",
                 (status, note, target_id),
             )
 
 
-def save_target_username(target_id: int, username: str, crm_db: str | None = None) -> None:
-    with connect(crm_db) as conn:
-        conn.execute(
+async def save_target_username(target_id: int, username: str, crm_db: str | None = None) -> None:
+    async with connect(crm_db) as conn:
+        await conn.execute(
             "UPDATE targets SET username = ?, updated_at = datetime('now') WHERE id = ?",
             (username.lstrip("@"), target_id),
         )
@@ -353,55 +385,56 @@ def save_target_username(target_id: int, username: str, crm_db: str | None = Non
 # Шаблоны
 # --------------------------------------------------------------------------
 
-def list_templates(crm_db: str | None = None) -> list[dict]:
-    with connect(crm_db) as conn:
-        rows = conn.execute("SELECT * FROM templates ORDER BY category, name").fetchall()
+async def list_templates(crm_db: str | None = None) -> list[dict]:
+    async with connect(crm_db) as conn:
+        cur = await conn.execute("SELECT * FROM templates ORDER BY category, name")
+        rows = await cur.fetchall()
     return [dict(r) for r in rows]
 
 
-def save_template(
+async def save_template(
     name: str, category: str, body: str, template_id: int | None = None,
     crm_db: str | None = None,
 ) -> int:
-    with connect(crm_db) as conn:
+    async with connect(crm_db) as conn:
         if template_id:
-            conn.execute(
+            await conn.execute(
                 "UPDATE templates SET name = ?, category = ?, body = ?,"
                 " updated_at = datetime('now') WHERE id = ?",
                 (name, category, body, template_id),
             )
             return template_id
-        cur = conn.execute(
+        cur = await conn.execute(
             "INSERT INTO templates (name, category, body) VALUES (?, ?, ?)",
             (name, category, body),
         )
         return int(cur.lastrowid)
 
 
-def delete_template(template_id: int, crm_db: str | None = None) -> None:
-    with connect(crm_db) as conn:
-        conn.execute("DELETE FROM templates WHERE id = ?", (template_id,))
+async def delete_template(template_id: int, crm_db: str | None = None) -> None:
+    async with connect(crm_db) as conn:
+        await conn.execute("DELETE FROM templates WHERE id = ?", (template_id,))
 
 
 # --------------------------------------------------------------------------
 # Очередь и журнал
 # --------------------------------------------------------------------------
 
-def queue_message(
+async def queue_message(
     target_id: int | None,
     chat: str,
     body: str,
     kind: str = "dm",
     crm_db: str | None = None,
 ) -> int:
-    with connect(crm_db) as conn:
-        cur = conn.execute(
+    async with connect(crm_db) as conn:
+        cur = await conn.execute(
             "INSERT INTO messages (target_id, chat, kind, body, status)"
             " VALUES (?, ?, ?, ?, 'queued')",
             (target_id, chat.lstrip("@"), kind, body),
         )
         if target_id:
-            conn.execute(
+            await conn.execute(
                 "UPDATE targets SET status = 'queued', updated_at = datetime('now')"
                 " WHERE id = ? AND status = 'new'",
                 (target_id,),
@@ -409,80 +442,88 @@ def queue_message(
         return int(cur.lastrowid)
 
 
-def next_queued(crm_db: str | None = None) -> dict | None:
-    with connect(crm_db) as conn:
-        row = conn.execute(
+async def next_queued(crm_db: str | None = None) -> dict | None:
+    async with connect(crm_db) as conn:
+        cur = await conn.execute(
             "SELECT * FROM messages WHERE status = 'queued' ORDER BY id LIMIT 1"
-        ).fetchone()
+        )
+        row = await cur.fetchone()
     return dict(row) if row else None
 
 
-def mark_message(
+async def mark_message(
     message_id: int,
     status: str,
     error: str = "",
     tg_id: int | None = None,
     crm_db: str | None = None,
 ) -> None:
-    with connect(crm_db) as conn:
-        conn.execute(
+    async with connect(crm_db) as conn:
+        await conn.execute(
             "UPDATE messages SET status = ?, error = ?, tg_id = ?,"
             " sent_at = CASE WHEN ? = 'sent' THEN datetime('now') ELSE sent_at END"
             " WHERE id = ?",
             (status, error[:500], tg_id, status, message_id),
         )
         if status == "sent":
-            row = conn.execute(
+            cur = await conn.execute(
                 "SELECT target_id FROM messages WHERE id = ?", (message_id,)
-            ).fetchone()
+            )
+            row = await cur.fetchone()
             if row and row["target_id"]:
-                conn.execute(
+                await conn.execute(
                     "UPDATE targets SET status = 'sent', updated_at = datetime('now')"
                     " WHERE id = ?",
                     (row["target_id"],),
                 )
 
 
-def sent_today(crm_db: str | None = None, tz_offset: int = 3) -> int:
+async def sent_today(crm_db: str | None = None, tz_offset: int = 3) -> int:
     """Сколько отправлено за сегодня в местном времени."""
     modifier = f"{tz_offset:+d} hours"
-    with connect(crm_db) as conn:
-        row = conn.execute(
+    async with connect(crm_db) as conn:
+        cur = await conn.execute(
             "SELECT count(*) AS n FROM messages"
             " WHERE status = 'sent' AND date(sent_at, ?) = date('now', ?)",
             (modifier, modifier),
-        ).fetchone()
+        )
+        row = await cur.fetchone()
     return row["n"]
 
 
-def list_messages(limit: int = 100, crm_db: str | None = None) -> list[dict]:
-    with connect(crm_db) as conn:
-        rows = conn.execute(
+async def list_messages(limit: int = 100, crm_db: str | None = None) -> list[dict]:
+    async with connect(crm_db) as conn:
+        cur = await conn.execute(
             "SELECT m.*, t.name AS target_name FROM messages m"
             " LEFT JOIN targets t ON t.id = m.target_id"
             " ORDER BY m.id DESC LIMIT ?",
             (limit,),
-        ).fetchall()
+        )
+        rows = await cur.fetchall()
     return [dict(r) for r in rows]
 
 
-def summary(crm_db: str | None = None) -> dict:
-    settings = get_settings(crm_db)
+async def summary(crm_db: str | None = None) -> dict:
+    settings = await get_settings(crm_db)
     tz = int(settings.get("timezone_offset", "3"))
     cap = int(settings.get("daily_cap", "10"))
-    today = sent_today(crm_db, tz)
-    counts = count_targets(crm_db)
-    with connect(crm_db) as conn:
-        queued = conn.execute(
+    today = await sent_today(crm_db, tz)
+    counts = await count_targets(crm_db)
+    async with connect(crm_db) as conn:
+        cur = await conn.execute(
             "SELECT count(*) AS n FROM messages WHERE status = 'queued'"
-        ).fetchone()["n"]
-        failed = conn.execute(
+        )
+        queued = (await cur.fetchone())["n"]
+        cur = await conn.execute(
             "SELECT count(*) AS n FROM messages WHERE status = 'failed'"
-        ).fetchone()["n"]
-        groups_total = conn.execute("SELECT count(*) AS n FROM groups").fetchone()["n"]
-        groups_posted = conn.execute(
+        )
+        failed = (await cur.fetchone())["n"]
+        cur = await conn.execute("SELECT count(*) AS n FROM groups")
+        groups_total = (await cur.fetchone())["n"]
+        cur = await conn.execute(
             "SELECT count(*) AS n FROM groups WHERE posted_at IS NOT NULL"
-        ).fetchone()["n"]
+        )
+        groups_posted = (await cur.fetchone())["n"]
     return {
         "targets": counts,
         "sent_today": today,
@@ -501,7 +542,7 @@ def summary(crm_db: str | None = None) -> dict:
 # Группы
 # --------------------------------------------------------------------------
 
-def list_groups(
+async def list_groups(
     niche: str | None = None, only_unposted: bool = False, crm_db: str | None = None
 ) -> list[dict]:
     where, args = [], []
@@ -511,37 +552,39 @@ def list_groups(
     if only_unposted:
         where.append("posted_at IS NULL")
     clause = ("WHERE " + " AND ".join(where)) if where else ""
-    with connect(crm_db) as conn:
-        rows = conn.execute(
+    async with connect(crm_db) as conn:
+        cur = await conn.execute(
             f"SELECT * FROM groups {clause} ORDER BY members DESC", args
-        ).fetchall()
+        )
+        rows = await cur.fetchall()
     return [dict(r) for r in rows]
 
 
-def mark_group_posted(
+async def mark_group_posted(
     group_id: int, note: str = "", crm_db: str | None = None
 ) -> None:
-    with connect(crm_db) as conn:
-        conn.execute(
+    async with connect(crm_db) as conn:
+        await conn.execute(
             "UPDATE groups SET posted_at = datetime('now'), posts = posts + 1,"
             " note = ? WHERE id = ?",
             (note, group_id),
         )
 
 
-def update_group_meta(
+async def update_group_meta(
     username: str, title: str, members: int, crm_db: str | None = None
 ) -> None:
-    with connect(crm_db) as conn:
-        conn.execute(
+    async with connect(crm_db) as conn:
+        await conn.execute(
             "UPDATE groups SET title = ?, members = ? WHERE username = ?",
             (title, members, username),
         )
 
 
-def niche_options(crm_db: str | None = None) -> list[str]:
-    with connect(crm_db) as conn:
-        rows = conn.execute(
+async def niche_options(crm_db: str | None = None) -> list[str]:
+    async with connect(crm_db) as conn:
+        cur = await conn.execute(
             "SELECT DISTINCT niche FROM groups WHERE niche != '' ORDER BY niche"
-        ).fetchall()
+        )
+        rows = await cur.fetchall()
     return [r["niche"] for r in rows]
