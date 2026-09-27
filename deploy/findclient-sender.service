@@ -1,0 +1,27 @@
+[Unit]
+Description=FindClient CRM — воркер отправки
+Documentation=file:/opt/2gi_scraper/crm/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/2gi_scraper
+EnvironmentFile=/opt/2gi_scraper/crm.env
+ExecStart=/opt/2gi_scraper/venv/bin/python -m crm.sender
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+# Отправку можно и нужно останавливать одной командой, не трогая панель:
+#   systemctl stop findclient-sender
+#
+# ProtectHome здесь НЕ ставим: Telethon держит файл сессии в /root/.hermes
+# и должен иметь право его перезаписывать. С read-only сессия не сохранится.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,23 @@
+[Unit]
+Description=FindClient CRM — панель рассылки
+Documentation=file:/opt/2gi_scraper/crm/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/2gi_scraper
+EnvironmentFile=/opt/2gi_scraper/crm.env
+ExecStart=/opt/2gi_scraper/venv/bin/python -m crm.app
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Панель держит историю переписки и список клиентов — лишние права ей ни к чему.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

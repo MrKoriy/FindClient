@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FindClient — рассылка</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#fff; --ink:#1a1d21; --dim:#6b7280; --line:#e3e6ea;
+    --accent:#2563eb; --ok:#15803d; --warn:#b45309; --bad:#b91c1c;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+       background:var(--bg);color:var(--ink)}
+  header{background:var(--panel);border-bottom:1px solid var(--line);padding:14px 22px;
+         display:flex;align-items:center;gap:18px;flex-wrap:wrap;position:sticky;top:0;z-index:5}
+  h1{font-size:16px;margin:0;font-weight:600}
+  nav{display:flex;gap:4px;flex-wrap:wrap}
+  nav button{background:none;border:1px solid transparent;padding:6px 12px;border-radius:7px;
+             cursor:pointer;font-size:14px;color:var(--dim)}
+  nav button:hover{background:#eef1f5;color:var(--ink)}
+  nav button.on{background:#e7efff;color:var(--accent);border-color:#cddcff;font-weight:500}
+  main{padding:22px;max-width:1400px;margin:0 auto}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:22px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .card .n{font-size:26px;font-weight:600;line-height:1.1}
+  .card .l{color:var(--dim);font-size:12px;margin-top:4px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:18px}
+  .panel h2{font-size:14px;margin:0 0 12px;font-weight:600}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+  input,select,textarea{font:inherit;padding:7px 10px;border:1px solid var(--line);
+                        border-radius:7px;background:#fff;color:var(--ink);max-width:100%}
+  textarea{width:100%;min-height:110px;line-height:1.5}
+  button.act{font:inherit;background:var(--accent);color:#fff;border:0;padding:7px 14px;
+             border-radius:7px;cursor:pointer}
+  button.act:hover{background:#1d4ed8}
+  button.ghost{background:#fff;border:1px solid var(--line);color:var(--ink);
+               padding:6px 11px;border-radius:7px;cursor:pointer;font:inherit}
+  button.ghost:hover{background:#f0f2f5}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--dim);font-weight:500;font-size:12px;text-transform:uppercase;letter-spacing:.03em}
+  tr:hover td{background:#fafbfc}
+  .tag{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:500}
+  .s-new{background:#eef1f5;color:#4b5563}
+  .s-queued{background:#fef3c7;color:var(--warn)}
+  .s-sent{background:#dbeafe;color:#1d4ed8}
+  .s-replied{background:#dcfce7;color:var(--ok)}
+  .s-refused{background:#fee2e2;color:var(--bad)}
+  .s-blocked{background:#fecaca;color:#7f1d1d}
+  .s-skip{background:#f3f4f6;color:#9ca3af}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+  .dim{color:var(--dim)}
+  .warn{background:#fffbeb;border:1px solid #fde68a;color:#78350f;padding:10px 13px;
+        border-radius:8px;font-size:13px;margin-bottom:14px}
+  .bad{color:var(--bad)}
+  .ok{color:var(--ok)}
+  dialog{border:1px solid var(--line);border-radius:12px;padding:0;max-width:640px;width:92%}
+  dialog::backdrop{background:rgba(0,0,0,.35)}
+  .dlg{padding:18px}
+  .dlg h3{margin:0 0 12px;font-size:15px}
+  .flex{display:flex;gap:10px;align-items:center}
+  .spacer{flex:1}
+  .hide{display:none}
+  .prev{background:#f9fafb;border:1px solid var(--line);border-radius:8px;padding:12px;
+        white-space:pre-wrap;line-height:1.55;font-size:13px}
+</style>
+</head>
+<body>
+<header>
+  <h1>FindClient · рассылка</h1>
+  <nav id="nav"></nav>
+  <div class="spacer"></div>
+  <span id="status" class="dim"></span>
+</header>
+<main id="view"></main>
+
+<dialog id="modal"><div class="dlg" id="modalBody"></div></dialog>
+
+<script>
+const VIEWS = [
+  ["dash","Сводка"],["targets","Цели"],["groups","Группы"],
+  ["log","Журнал"],["tpl","Шаблоны"],["set","Настройки"]
+];
+let current = location.hash.slice(1) || "dash";
+const STATUS_LABELS = {
+  new:"Не писали", queued:"В очереди", sent:"Отправлено", replied:"Ответил",
+  refused:"Отказ", blocked:"Блок / жалоба", skip:"Не наш случай"
+};
+
+const api = {
+  async get(p){ const r = await fetch(p); if(!r.ok) throw new Error((await r.json()).error||r.statusText); return r.json(); },
+  async send(p, body, method="POST"){
+    const r = await fetch(p, {method, headers:{"Content-Type":"application/json"},
+                              body: body===undefined?undefined:JSON.stringify(body)});
+    const j = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(j.error || r.statusText);
+    return j;
+  }
+};
+const esc = s => String(s??"").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const tag = s => `<span class="tag s-${esc(s)}">${esc(STATUS_LABELS[s]||s)}</span>`;
+const num = n => (n??0).toLocaleString("ru-RU");
+
+function renderNav(){
+  document.getElementById("nav").innerHTML = VIEWS.map(([id,label]) =>
+    `<button data-go="${id}" class="${id===current?"on":""}">${label}</button>`).join("");
+}
+document.getElementById("nav").addEventListener("click", e => {
+  const b = e.target.closest("[data-go]"); if(!b) return;
+  current = b.dataset.go; location.hash = current; route();
+});
+window.addEventListener("hashchange", ()=>{ current = location.hash.slice(1)||"dash"; route(); });
+
+function modal(html){ const d=document.getElementById("modal");
+  document.getElementById("modalBody").innerHTML = html; d.showModal(); }
+function closeModal(){ document.getElementById("modal").close(); }
+document.getElementById("modal").addEventListener("click", e => {
+  if(e.target.id === "modal") closeModal();
+});
+
+async function route(){
+  renderNav();
+  const v = document.getElementById("view");
+  v.innerHTML = '<p class="dim">Загружаю…</p>';
+  try{
+    if(current==="dash")    await viewDash(v);
+    if(current==="targets") await viewTargets(v);
+    if(current==="groups")  await viewGroups(v);
+    if(current==="log")     await viewLog(v);
+    if(current==="tpl")     await viewTemplates(v);
+    if(current==="set")     await viewSettings(v);
+    setStatus("");
+  }catch(e){ v.innerHTML = `<div class="warn bad">${esc(e.message)}</div>`; }
+}
+function setStatus(t){ document.getElementById("status").textContent = t; }
+
+// ---------------------------------------------------------------- сводка
+async function viewDash(v){
+  const s = await api.get("/api/summary");
+  v.innerHTML = `
+  <div class="cards">
+    <div class="card"><div class="n">${num(s.targets.new)}</div><div class="l">целей не тронуто</div></div>
+    <div class="card"><div class="n">${num(s.sent_today)} <span class="dim" style="font-size:14px">/ ${num(s.daily_cap)}</span></div><div class="l">отправлено сегодня</div></div>
+    <div class="card"><div class="n">${num(s.left_today)}</div><div class="l">осталось на сегодня</div></div>
+    <div class="card"><div class="n">${num(s.queued)}</div><div class="l">в очереди</div></div>
+    <div class="card"><div class="n">${num(s.targets.replied)}</div><div class="l">ответили</div></div>
+    <div class="card"><div class="n">${num(s.groups_posted)} <span class="dim" style="font-size:14px">/ ${num(s.groups_total)}</span></div><div class="l">групп отработано</div></div>
+  </div>
+  ${s.enabled ? "" : `<div class="warn"><b>Отправка выключена.</b> Воркер стоит и ничего не отправляет.
+      Включить: «Настройки» → «Отправка разрешена».</div>`}
+  ${s.dry_run && s.enabled ? `<div class="warn"><b>Холостой ход.</b> Воркер разбирает очередь,
+      но сообщения не уходят — только пишутся в журнал.</div>` : ""}
+  <div class="panel">
+    <h2>Статусы целей</h2>
+    <table><tbody>
+    ${Object.keys(STATUS_LABELS).map(k =>
+      `<tr><td style="width:180px">${tag(k)}</td><td>${num(s.targets[k])}</td></tr>`).join("")}
+    <tr><td class="dim">Всего</td><td><b>${num(s.targets.all)}</b></td></tr>
+    </tbody></table>
+  </div>
+  <div class="panel">
+    <h2>С чего начать</h2>
+    <ol class="dim" style="margin:0;padding-left:20px;line-height:1.9">
+      <li>«Цели» → <b>Подтянуть из базы</b>: компании с карт попадут сюда, без сайта — как рабочие цели.</li>
+      <li>«Группы» → <b>Загрузить каталог</b>: 133 проверенных чата по нишам.</li>
+      <li>«Шаблоны»: проверить текст. Панель сама скажет, если он похож на спам.</li>
+      <li>«Цели»: открыть цель → <b>Текст</b> → скопировать и написать руками либо поставить в очередь.</li>
+      <li>Перед включением отправки прочитать «Настройки» — там лимиты.</li>
+    </ol>
+  </div>`;
+}
+
+// ---------------------------------------------------------------- цели
+let tFilters = {status:"", search:"", limit:200, offset:0};
+async function viewTargets(v){
+  const q = new URLSearchParams();
+  if(tFilters.status) q.set("status", tFilters.status);
+  if(tFilters.search) q.set("search", tFilters.search);
+  q.set("limit", tFilters.limit); q.set("offset", tFilters.offset);
+  const d = await api.get("/api/targets?"+q);
+
+  const opts = [["","Все статусы"]].concat(Object.entries(STATUS_LABELS))
+    .map(([k,l]) => `<option value="${k}" ${k===tFilters.status?"selected":""}>${esc(l)}</option>`).join("");
+
+  v.innerHTML = `
+  <div class="panel">
+    <div class="row">
+      <select id="fStatus">${opts}</select>
+      <input id="fSearch" placeholder="поиск: название, телефон, адрес, соцсети" value="${esc(tFilters.search)}" style="flex:1;min-width:220px">
+      <button class="act" id="fGo">Показать</button>
+      <div class="spacer"></div>
+      <button class="ghost" id="doImport">Подтянуть из базы</button>
+    </div>
+    <div class="dim">Найдено: ${num(d.counts.all)} целей всего. Показаны ${num(d.items.length)}
+      ${d.counts.all>d.items.length?"· листайте кнопками внизу":""}</div>
+  </div>
+  <div class="panel">
+    <table>
+      <thead><tr><th>Название</th><th>Контакты</th><th>Рейтинг</th><th>Город</th><th>Статус</th><th></th></tr></thead>
+      <tbody>${d.items.map(t => `
+        <tr>
+          <td>${esc(t.name)||"<span class=dim>без названия</span>"}
+              <div class="dim mono">${esc(t.category)}</div></td>
+          <td class="mono">${esc(t.phone)}<br><span class="dim">${esc(t.socials).split(",")[0]||""}</span></td>
+          <td>${t.rating?esc(String(t.rating).replace(".",",")):"—"}
+              <div class="dim">${t.reviews?num(t.reviews)+" отз.":""}</div></td>
+          <td>${esc(t.city)||"<span class=dim>—</span>"}</td>
+          <td>${tag(t.status)}${t.username?`<div class="dim mono">@${esc(t.username)}</div>`:""}</td>
+          <td><button class="ghost" data-t="${t.id}">Текст</button></td>
+        </tr>`).join("")}
+      </tbody>
+    </table>
+    <div class="row" style="margin-top:14px">
+      <button class="ghost" id="prev" ${tFilters.offset<=0?"disabled":""}>← Назад</button>
+      <button class="ghost" id="next" ${tFilters.offset+d.limit>=d.counts.all?"disabled":""}>Вперёд →</button>
+    </div>
+  </div>`;
+
+  v.querySelector("#fGo").onclick = () => {
+    tFilters.status = v.querySelector("#fStatus").value;
+    tFilters.search = v.querySelector("#fSearch").value.trim();
+    tFilters.offset = 0; route();
+  };
+  v.querySelector("#fSearch").onkeydown = e => { if(e.key==="Enter") v.querySelector("#fGo").click(); };
+  v.querySelector("#prev").onclick = () => { tFilters.offset = Math.max(0, tFilters.offset-tFilters.limit); route(); };
+  v.querySelector("#next").onclick = () => { tFilters.offset += tFilters.limit; route(); };
+  v.querySelector("#doImport").onclick = async e => {
+    e.target.disabled = true; setStatus("Читаю базу бота…");
+    try{ const r = await api.send("/api/targets/import");
+      setStatus(`Добавлено целей: ${r.added}`); route();
+    }catch(err){ setStatus(""); alert(err.message); e.target.disabled=false; }
+  };
+  v.querySelectorAll("[data-t]").forEach(b => b.onclick = () => openTarget(+b.dataset.t));
+}
+
+async function openTarget(id){
+  const {items} = await api.get("/api/targets?limit=1000");
+  const t = items.find(x => x.id === id);
+  if(!t) return;
+  const tpls = (await api.get("/api/templates")).items;
+  const tplOpts = tpls.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join("");
+
+  modal(`
+    <h3>${esc(t.name)}</h3>
+    <div class="dim" style="margin-bottom:12px">
+      ${esc(t.address)||"—"} · ${esc(t.city)||"—"} · ${esc(t.phone)||"—"}
+      ${t.socials?`<br>${esc(t.socials)}`:""}
+    </div>
+    <div class="row">
+      <label class="flex">@<input id="uname" value="${esc(t.username)}" placeholder="юзернейм цели" style="width:180px"></label>
+      <button class="ghost" id="saveU">Сохранить</button>
+      <div class="spacer"></div>
+      <select id="tplSel">${tplOpts}</select>
+      <label class="flex"><input type="checkbox" id="withLink"> со ссылкой</label>
+      <button class="ghost" id="mkText">Собрать текст</button>
+    </div>
+    <div id="problems"></div>
+    <div class="prev" id="previewText">Выберите шаблон и нажмите «Собрать текст».</div>
+    <div class="row" style="margin-top:12px">
+      <button class="act" id="toQueue">В очередь</button>
+      <button class="ghost" id="copy">Скопировать</button>
+      <div class="spacer"></div>
+      <select id="stSel">${Object.entries(STATUS_LABELS)
+        .map(([k,l])=>`<option value="${k}" ${k===t.status?"selected":""}>${esc(l)}</option>`).join("")}</select>
+      <button class="ghost" id="saveSt">Отметить</button>
+    </div>`);
+
+  let text = "";
+  const setPrev = s => { text = s; document.getElementById("previewText").textContent = s || "…"; };
+
+  document.getElementById("mkText").onclick = async () => {
+    const tid = document.getElementById("tplSel").value;
+    const wl = document.getElementById("withLink").checked ? "1" : "0";
+    const r = await api.get(`/api/preview?target_id=${id}&template_id=${tid}&with_link=${wl}`);
+    setPrev(r.text);
+    document.getElementById("problems").innerHTML = r.problems.length
+      ? `<div class="warn">Замечания: ${r.problems.map(esc).join("; ")}</div>`
+      : `<div class="warn" style="background:#f0fdf4;border-color:#bbf7d0;color:#166534">
+           Замечаний нет · ${r.words} слов</div>`;
+  };
+  document.getElementById("saveU").onclick = async () => {
+    await api.send(`/api/targets/${id}/username`, {username: document.getElementById("uname").value});
+    setStatus("Юзернейм сохранён");
+  };
+  document.getElementById("copy").onclick = async () => {
+    try{ await navigator.clipboard.writeText(text); setStatus("Скопировано"); }
+    catch{ setStatus("Браузер не дал скопировать"); }
+  };
+  document.getElementById("toQueue").onclick = async () => {
+    if(!text){ alert("Сначала соберите текст"); return; }
+    try{
+      await api.send("/api/queue", {target_id:id, body:text, kind:"dm"});
+      setStatus("В очереди"); closeModal(); route();
+    }catch(e){ alert(e.message); }
+  };
+  document.getElementById("saveSt").onclick = async () => {
+    await api.send(`/api/targets/${id}/status`, {status: document.getElementById("stSel").value});
+    setStatus("Статус обновлён"); closeModal(); route();
+  };
+  document.getElementById("mkText").click();
+}
+
+// ---------------------------------------------------------------- группы
+async function viewGroups(v){
+  const only = new URLSearchParams(location.search).get("unposted") === "1";
+  const d = await api.get("/api/groups?only_unposted=" + (only?1:0));
+  const byNiche = {};
+  d.items.forEach(g => { (byNiche[g.niche || "без ниши"] ||= []).push(g); });
+
+  v.innerHTML = `
+  <div class="warn">
+    Стратегия «сначала группы»: вы публикуетесь в чате по теме, люди пишут сами.
+    На ответы лимитов нет, и PEER_FLOOD от публикаций не срабатывает.
+    Холодные сообщения в личку — отдельный риск, к ним переходите позже и понемногу.
+  </div>
+  <div class="panel">
+    <div class="row">
+      <button class="ghost" id="impG">Загрузить каталог из data/niches.py</button>
+      <label class="flex"><input type="checkbox" id="onlyUn" ${only?"checked":""}> только не отработанные</label>
+      <div class="spacer"></div>
+      <span class="dim">${num(d.total)} групп · ниш: ${Object.keys(byNiche).length}</span>
+    </div>
+  </div>
+  ${Object.entries(byNiche).map(([niche, list]) => `
+    <div class="panel">
+      <h2>${esc(niche)} <span class="dim" style="font-weight:400">· ${list.length}</span></h2>
+      <table><thead><tr><th>Чат</th><th>Участников</th><th>Отработано</th><th></th></tr></thead>
+      <tbody>${list.map(g => `
+        <tr>
+          <td><a href="https://t.me/${esc(g.username)}" target="_blank" rel="noopener"
+                 class="mono" style="color:var(--accent)">@${esc(g.username)}</a>
+              <div class="dim">${esc(g.title)||""}</div></td>
+          <td>${g.members?num(g.members):"<span class=dim>—</span>"}</td>
+          <td>${g.posted_at?`<span class="ok">${esc(g.posted_at)}</span>`:"<span class=dim>нет</span>"}</td>
+          <td><button class="ghost" data-g="${g.id}">Опубликовано</button></td>
+        </tr>`).join("")}
+      </tbody></table>
+    </div>`).join("")}`;
+
+  v.querySelector("#onlyUn").onchange = e => {
+    const u = new URL(location); e.target.checked ? u.searchParams.set("unposted","1")
+                                                  : u.searchParams.delete("unposted");
+    location.href = u;
+  };
+  v.querySelector("#impG").onclick = async e => {
+    e.target.disabled = true; setStatus("Загружаю каталог…");
+    try{ const r = await api.send("/api/groups/import");
+      setStatus(`Групп добавлено: ${r.added}`); route();
+    }catch(err){ alert(err.message); e.target.disabled=false; }
+  };
+  v.querySelectorAll("[data-g]").forEach(b => b.onclick = async () => {
+    await api.send(`/api/groups/${b.dataset.g}/posted`, {note:""});
+    setStatus("Отмечено"); route();
+  });
+}
+
+// ---------------------------------------------------------------- журнал
+async function viewLog(v){
+  const d = await api.get("/api/messages?limit=200");
+  v.innerHTML = `
+  <div class="panel">
+    <h2>Журнал отправок — кому, что и когда</h2>
+    <table><thead><tr><th>Когда</th><th>Кому</th><th>Текст</th><th>Статус</th></tr></thead>
+    <tbody>${d.items.length ? d.items.map(m => `
+      <tr>
+        <td class="dim mono">${esc(m.sent_at||m.created_at)}</td>
+        <td>${esc(m.target_name||"—")}<div class="dim mono">@${esc(m.chat)}</div></td>
+        <td style="max-width:520px">${esc((m.body||"").slice(0,220))}${(m.body||"").length>220?"…":""}</td>
+        <td>${m.status==="sent"?'<span class="ok">отправлено</span>'
+              :m.status==="failed"?`<span class="bad">ошибка</span><div class="dim mono">${esc(m.error)}</div>`
+              :m.status==="queued"?'<span class="dim">в очереди</span>':esc(m.status)}</td>
+      </tr>`).join("") : `<tr><td colspan="4" class="dim">Пусто. Здесь появится всё, что уйдёт.</td></tr>`}
+    </tbody></table>
+  </div>`;
+}
+
+// ---------------------------------------------------------------- шаблоны
+async function viewTemplates(v){
+  const d = await api.get("/api/templates");
+  v.innerHTML = `
+  <div class="panel">
+    <h2>Шаблоны</h2>
+    <div class="dim" style="margin-bottom:12px">
+      Переменные: <span class="mono">{facts}</span> — уже согласованное «5,0 и 91 отзыв»,
+      <span class="mono">{name} {rating} {reviews} {city} {category} {address} {phone} {link}</span>.
+      Города и категории подставляются в именительном падеже, поэтому «в {city}» писать нельзя.
+    </div>
+    ${d.items.map(t => `
+      <div class="panel" style="background:#fafbfc">
+        <div class="row">
+          <input value="${esc(t.name)}" data-n="${t.id}" style="width:220px">
+          <input value="${esc(t.category)}" data-c="${t.id}" placeholder="категория (пусто = всем)" style="width:220px">
+          <div class="spacer"></div>
+          <button class="ghost" data-save="${t.id}">Сохранить</button>
+          <button class="ghost" data-del="${t.id}">Удалить</button>
+        </div>
+        <textarea data-b="${t.id}">${esc(t.body)}</textarea>
+        <div class="dim" id="chk-${t.id}" style="margin-top:6px"></div>
+      </div>`).join("")}
+    <div class="row">
+      <button class="act" id="newTpl">Добавить шаблон</button>
+      <button class="ghost" id="chkAll">Проверить все</button>
+    </div>
+  </div>`;
+
+  v.querySelectorAll("[data-save]").forEach(b => b.onclick = async () => {
+    const id = b.dataset.save;
+    await api.send("/api/templates", {
+      id:+id, name:v.querySelector(`[data-n="${id}"]`).value,
+      category:v.querySelector(`[data-c="${id}"]`).value,
+      body:v.querySelector(`[data-b="${id}"]`).value});
+    setStatus("Шаблон сохранён"); route();
+  });
+  v.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+    if(!confirm("Удалить шаблон?")) return;
+    await api.send(`/api/templates/${b.dataset.del}`, undefined, "DELETE"); route();
+  });
+  v.querySelector("#newTpl").onclick = async () => {
+    await api.send("/api/templates", {name:"Новый шаблон", category:"", body:"Здравствуйте! "});
+    route();
+  };
+  v.querySelector("#chkAll").onclick = async () => {
+    for(const t of d.items){
+      const r = await api.get(`/api/preview?body=${encodeURIComponent(t.body)}&with_link=1`);
+      const el = v.querySelector(`#chk-${t.id}`);
+      el.innerHTML = r.problems.length ? `<span class="bad">${r.problems.map(esc).join("; ")}</span>`
+                                      : `<span class="ok">Замечаний нет · ${r.words} слов</span>`;
+    }
+  };
+}
+
+// ---------------------------------------------------------------- настройки
+async function viewSettings(v){
+  const s = await api.get("/api/settings");
+  v.innerHTML = `
+  <div class="warn">
+    Лимиты не косметические. Свежий аккаунт выдерживает 10–15 холодных сообщений в день,
+    прогретый — 30–40. Аккаунт <b>@capyleos уже помечен</b>, поэтому начинать надо с нижней
+    границы и пауз в минуты, а не секунды. Растянутые 30 сообщений на 6 часов не ловят
+    ограничение, те же 30 за полтора часа — ловят в большинстве случаев.
+  </div>
+  <div class="panel">
+    <h2>Отправка</h2>
+    <div class="row"><label class="flex"><input type="checkbox" id="enabled" ${s.enabled==="1"?"checked":""}>
+      Отправка разрешена (воркер отправляет)</label></div>
+    <div class="row"><label class="flex"><input type="checkbox" id="dry_run" ${s.dry_run==="1"?"checked":""}>
+      Холостой ход (разбирать очередь, но не отправлять)</label></div>
+    <div class="row"><label class="flex"><input type="checkbox" id="first_message_no_link" ${s.first_message_no_link==="1"?"checked":""}>
+      Без ссылки в первом сообщении</label></div>
+  </div>
+  <div class="panel">
+    <h2>Лимиты и паузы</h2>
+    <div class="row">
+      <label>В день <input id="daily_cap" type="number" min="1" max="100" value="${esc(s.daily_cap)}" style="width:80px"></label>
+      <label>Пауза от, сек <input id="min_delay" type="number" min="5" value="${esc(s.min_delay)}" style="width:100px"></label>
+      <label>до <input id="max_delay" type="number" min="5" value="${esc(s.max_delay)}" style="width:100px"></label>
+    </div>
+    <div class="row">
+      <label>Длинная пауза после <input id="cooldown_every" type="number" min="1" value="${esc(s.cooldown_every)}" style="width:80px"> сообщений</label>
+      <label>длится, сек <input id="cooldown_seconds" type="number" min="60" value="${esc(s.cooldown_seconds)}" style="width:110px"></label>
+    </div>
+    <div class="row">
+      <label>Рабочие часы с <input id="work_from" type="number" min="0" max="23" value="${esc(s.work_from)}" style="width:70px"></label>
+      <label>по <input id="work_to" type="number" min="0" max="24" value="${esc(s.work_to)}" style="width:70px"></label>
+      <label>часовой пояс <input id="timezone_offset" type="number" min="-12" max="14" value="${esc(s.timezone_offset)}" style="width:70px"></label>
+    </div>
+    <div class="row"><button class="act" id="save">Сохранить</button></div>
+  </div>`;
+
+  v.querySelector("#save").onclick = async () => {
+    const val = id => { const el = v.querySelector("#"+id);
+      return el.type==="checkbox" ? (el.checked?"1":"0") : el.value; };
+    await api.send("/api/settings", Object.fromEntries(
+      ["enabled","dry_run","first_message_no_link","daily_cap","min_delay","max_delay",
+       "cooldown_every","cooldown_seconds","work_from","work_to","timezone_offset"]
+      .map(id => [id, val(id)])));
+    setStatus("Сохранено"); route();
+  };
+}
+
+route();
+</script>
+</body>
+</html>

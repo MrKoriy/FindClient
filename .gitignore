@@ -6,4 +6,9 @@ __pycache__/
 .freebuff/
 .pytest_cache/
 *.db
+*.db-shm
+*.db-wal
 .venv/
+venv/
+crm.env
+twogis_creds.json
