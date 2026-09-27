@@ -1,7 +1,11 @@
 """Catalog of high-value niches: map queries, Telegram keywords and seed chats.
 
 Figures are rough market estimates (research on 2026-09-25), used to prioritise outreach.
-Telegram chats were verified via t.me on the same date; member counts drift over time.
+
+Telegram chats were re-verified on 2026-09-27 by reading each group's recent messages and
+counting distinct authors: a group that exists but has no authors is useless for lead
+sourcing, and 18 of the original 43 turned out to be exactly that. Only groups are kept —
+a channel has no authors to harvest. Member counts and activity drift over time.
 """
 
 from dataclasses import dataclass
@@ -32,7 +36,7 @@ NICHES: tuple[Niche, ...] = (
         why='Длинный цикл сделки: клиент сравнивает проекты, портфолио и сметы онлайн',
         map_presence='partly',
         tg_keywords=('строительство домов', 'каркасные дома', 'стройка чат'),
-        tg_chats=('stroiteli_moscow', 'stroitely_top', 'stroikamoskvacat', 'moskvaz_shabashkaq', 'monolit_msk_pro', 'stroiteli_msk_pro', 'rabotaq_vakansiizq', 'stroyka_rabota_podrabotka', 'vsem_podryad', 'brobuilder', 'chinim_stroim', 'stroyLO', 'stroy_s_pb', 'nasha_stroyka_spb', 'stroitelstvopiter', 'builder_178', 'ssoospb', 'karkas_dom_pro', 'derevo_dom_pro', 'kamen_dom_pro'),
+        tg_chats=('stroitely_top', 'stroikamoskvacat', 'moskvaz_shabashkaq', 'brobuilder', 'chinim_stroim', 'stroy_s_pb', 'nasha_stroyka_spb', 'stroitelstvopiter', 'builder_178'),
     ),
     Niche(
         id='apartment_renovation',
@@ -44,7 +48,7 @@ NICHES: tuple[Niche, ...] = (
         why='Калькулятор сметы и портфолио — главный конвертер заявок',
         map_presence='partly',
         tg_keywords=('ремонт квартир', 'отделочники', 'ремонт чат'),
-        tg_chats=('stroiteli_moscow', 'stroitely_top', 'stroikamoskvacat', 'moskvaz_shabashkaq', 'monolit_msk_pro', 'stroiteli_msk_pro', 'rabotaq_vakansiizq', 'stroyka_rabota_podrabotka', 'vsem_podryad', 'brobuilder', 'chinim_stroim', 'stroyLO', 'stroy_s_pb', 'nasha_stroyka_spb', 'stroitelstvopiter', 'builder_178', 'ssoospb'),
+        tg_chats=('stroitely_top', 'stroikamoskvacat', 'moskvaz_shabashkaq', 'brobuilder', 'chinim_stroim', 'stroy_s_pb', 'nasha_stroyka_spb', 'stroitelstvopiter', 'builder_178', 'otdelkaspb', 'stroimskva', 'stroitelstvomos'),
     ),
     Niche(
         id='builders_brigades',
@@ -56,7 +60,7 @@ NICHES: tuple[Niche, ...] = (
         why='Живут на сарафане и чатах; сайт-визитка с портфолио поднимает чек и доверие',
         map_presence='no',
         tg_keywords=('строители', 'прорабы', 'бригада', 'подряд', 'субподряд', 'шабашка'),
-        tg_chats=('stroimateriali_chat', 'stroiteli_moscow', 'stroitely_top', 'stroikamoskvacat', 'moskvaz_shabashkaq', 'monolit_msk_pro', 'stroiteli_msk_pro', 'rabotaq_vakansiizq', 'stroyka_rabota_podrabotka', 'vsem_podryad', 'brobuilder', 'chinim_stroim', 'stroyLO', 'stroy_s_pb', 'nasha_stroyka_spb', 'stroitelstvopiter', 'builder_178', 'ssoospb'),
+        tg_chats=('stroimateriali_chat', 'stroitely_top', 'stroikamoskvacat', 'moskvaz_shabashkaq', 'brobuilder', 'chinim_stroim', 'stroy_s_pb', 'nasha_stroyka_spb', 'stroitelstvopiter', 'builder_178', 'stroitelitumeni'),
     ),
     Niche(
         id='interior_design',
@@ -68,7 +72,7 @@ NICHES: tuple[Niche, ...] = (
         why='Продают визуалом: сайт-портфолио — главный аргумент для клиента',
         map_presence='partly',
         tg_keywords=('дизайнеры интерьера', 'дизайн интерьера'),
-        tg_chats=('domeoru', 'dizayneri_constructori', 'house_designer', 'interior_russia'),
+        tg_chats=('dizayneri_constructori', 'house_designer', 'interior_russia', 'design_athome', 'interior_design_adverts', 'designerinterior_moscow', 'chat_mila_kolpakova', 'design_interior_chat1'),
     ),
     Niche(
         id='roofing',
@@ -80,7 +84,6 @@ NICHES: tuple[Niche, ...] = (
         why="Сезонный спрос, заявки идут из поиска 'кровля под ключ цена'",
         map_presence='partly',
         tg_keywords=('кровля', 'кровельщики'),
-        tg_chats=('krovlya_msk_pro', 'rooffer1', 'roofers_chats'),
     ),
     Niche(
         id='facade',
@@ -92,7 +95,7 @@ NICHES: tuple[Niche, ...] = (
         why='B2B-тендеры и частники ищут подрядчика с кейсами',
         map_presence='partly',
         tg_keywords=('фасадчики', 'фасад'),
-        tg_chats=('fasad_msk_pro',),
+        tg_chats=('chatfasad', 'Facadesmsk', 'dvor_fasadsisedi'),
     ),
     Niche(
         id='windows',
@@ -104,7 +107,7 @@ NICHES: tuple[Niche, ...] = (
         why='Высокая конкуренция в контексте, нужен лендинг с квизом-замером',
         map_presence='yes',
         tg_keywords=(),
-        tg_chats=(),
+        tg_chats=('oknabrigada',),
     ),
     Niche(
         id='concrete_rbi',
@@ -116,7 +119,7 @@ NICHES: tuple[Niche, ...] = (
         why='Прайс, калькулятор кубов и доставка — заказы с сайта',
         map_presence='yes',
         tg_keywords=('бетон', 'жби'),
-        tg_chats=(),
+        tg_chats=('betonlinechat', 'if_estate_chat', 'betonovosti'),
     ),
     Niche(
         id='special_machinery',
@@ -128,7 +131,7 @@ NICHES: tuple[Niche, ...] = (
         why='Каталог техники с ценами за смену, заявки по телефону с сайта',
         map_presence='partly',
         tg_keywords=('спецтехника', 'аренда спецтехники'),
-        tg_chats=('arenda_spetstekhnika', 'spectehnika_1', 'Arenda_Spetstekhniky', 'spec_mos', 'arenda_spectehniki1', 'spectechnikarent'),
+        tg_chats=('arenda_spetstekhnika', 'spectehnika_1', 'Arenda_Spetstekhniky', 'spec_mos', 'arenda_spectehniki1', 'spectechnikarent', 'Spec_Tehnika24', 'spectehnix', 'SRO_rus', 'spec_tehnika_info', 'rentagzayavki'),
     ),
     Niche(
         id='metal_structures',
@@ -140,7 +143,7 @@ NICHES: tuple[Niche, ...] = (
         why='B2B-клиенты требуют портфолио объектов и КП',
         map_presence='yes',
         tg_keywords=(),
-        tg_chats=(),
+        tg_chats=('svarga_chat1', 'MKotAdoZ', 'Metalloprokatbu'),
     ),
     Niche(
         id='saunas_bath',
@@ -152,7 +155,7 @@ NICHES: tuple[Niche, ...] = (
         why='Эмоциональная покупка — нужны фото, проекты и цены',
         map_presence='partly',
         tg_keywords=('бани', 'строительство бань'),
-        tg_chats=(),
+        tg_chats=('b_banya', 'bania7177', 'banyakovcheg', 'banikingchat', 'Banyasmakk'),
     ),
     Niche(
         id='fences_gates',
@@ -164,7 +167,6 @@ NICHES: tuple[Niche, ...] = (
         why='Калькулятор погонного метра повышает конверсию',
         map_presence='partly',
         tg_keywords=(),
-        tg_chats=(),
     ),
     Niche(
         id='landscape',
@@ -176,7 +178,7 @@ NICHES: tuple[Niche, ...] = (
         why='Визуальная ниша: портфолио решает',
         map_presence='partly',
         tg_keywords=('ландшафт', 'ландшафтный дизайн'),
-        tg_chats=(),
+        tg_chats=('mkuzhkh', 'marfino52', 'landspace_rus', 'stroikoalicia'),
     ),
     Niche(
         id='wells_drilling',
@@ -188,7 +190,6 @@ NICHES: tuple[Niche, ...] = (
         why="Горячий спрос 'бурение скважин цена за метр'",
         map_presence='partly',
         tg_keywords=('скважины', 'бурение'),
-        tg_chats=(),
     ),
     Niche(
         id='heating_engineering',
@@ -200,7 +201,7 @@ NICHES: tuple[Niche, ...] = (
         why='Сложная услуга, клиенту нужна экспертиза и смета',
         map_presence='partly',
         tg_keywords=(),
-        tg_chats=(),
+        tg_chats=('Uslugy_Santekhnika', 'otoplenielyub'),
     ),
     Niche(
         id='foundation_works',
@@ -212,7 +213,7 @@ NICHES: tuple[Niche, ...] = (
         why='Типовой лендинг с расчетом стоимости фундамента',
         map_presence='partly',
         tg_keywords=('монолитчики', 'бетон'),
-        tg_chats=(),
+        tg_chats=('foundation_life',),
     ),
     Niche(
         id='real_estate_agency',
@@ -224,7 +225,7 @@ NICHES: tuple[Niche, ...] = (
         why='Каталог объектов, сбор лидов на подбор',
         map_presence='yes',
         tg_keywords=('недвижимость', 'риэлторы'),
-        tg_chats=('nedvigimost_moskva', 'estatemsk', 'realtor_msk_official', 'bazaestate', 'bazarealestate', 'chat_realty', 'bazaestatespb', 'nedvizhimost_peterburg'),
+        tg_chats=('nedvigimost_moskva', 'estatemsk', 'bazarealestate', 'chat_realty', 'bazaestatespb', 'nedvizhimost_peterburg', 'realtor_ipoteka_banki', 'sochi_topchat', 'Ripotekachat', 'chatt_pkhuket'),
     ),
     Niche(
         id='country_real_estate',
@@ -236,7 +237,7 @@ NICHES: tuple[Niche, ...] = (
         why='Каждый посёлок продают через отдельный лендинг',
         map_presence='partly',
         tg_keywords=(),
-        tg_chats=(),
+        tg_chats=('YubileynyySamara',),
     ),
     Niche(
         id='dentistry',
@@ -248,7 +249,7 @@ NICHES: tuple[Niche, ...] = (
         why='Имплантация/брекеты продаются через сайт с ценами и врачами',
         map_presence='yes',
         tg_keywords=(),
-        tg_chats=(),
+        tg_chats=('stomatologi_chats', 'StomatologiRussClub', 'stomatologiaru', 'stom_surgery_chat', 'UniversalDentistry', 'dental_chat_bt'),
     ),
     Niche(
         id='cosmetology',
@@ -260,7 +261,7 @@ NICHES: tuple[Niche, ...] = (
         why='Онлайн-запись и прайс, прогрев через контент',
         map_presence='yes',
         tg_keywords=(),
-        tg_chats=(),
+        tg_chats=('cosmetologiainside', 'cosmo_der', 'cosmetologiapro', 'kosmetologi_forum', 'Kosmetologia_chat_ru'),
     ),
     Niche(
         id='plastic_surgery',
@@ -272,7 +273,6 @@ NICHES: tuple[Niche, ...] = (
         why='Доверие: хирурги, до/после, лицензии',
         map_presence='yes',
         tg_keywords=(),
-        tg_chats=(),
     ),
     Niche(
         id='private_clinic',
@@ -284,7 +284,7 @@ NICHES: tuple[Niche, ...] = (
         why='Онлайн-запись, SEO по услугам',
         map_presence='yes',
         tg_keywords=(),
-        tg_chats=(),
+        tg_chats=('panaceya24chat',),
     ),
     Niche(
         id='auto_service_premium',
@@ -296,7 +296,7 @@ NICHES: tuple[Niche, ...] = (
         why='Заявки на дорогие работы (PPF, АКПП) идут из поиска',
         map_presence='yes',
         tg_keywords=(),
-        tg_chats=(),
+        tg_chats=('geelygarage', 'detailin', 'https3f1CyRDFBXQzNGQ6', 'doubletintchat', 'marauto100'),
     ),
     Niche(
         id='auto_import',
@@ -308,7 +308,7 @@ NICHES: tuple[Niche, ...] = (
         why='Каталог и калькулятор растаможки — основа продаж',
         map_presence='partly',
         tg_keywords=(),
-        tg_chats=(),
+        tg_chats=('AutoMotoAsia_Chat', 'avtobezzabot'),
     ),
     Niche(
         id='custom_kitchens',
@@ -320,7 +320,7 @@ NICHES: tuple[Niche, ...] = (
         why='Портфолио + квиз-расчёт кухни',
         map_presence='yes',
         tg_keywords=(),
-        tg_chats=(),
+        tg_chats=('mebelmoskuzneck', 'StilnayaMebel1'),
     ),
     Niche(
         id='stairs_doors_premium',
@@ -332,7 +332,6 @@ NICHES: tuple[Niche, ...] = (
         why='Каталог и производственный цикл показываются на сайте',
         map_presence='yes',
         tg_keywords=(),
-        tg_chats=(),
     ),
     Niche(
         id='manufacturing_b2b',
@@ -344,7 +343,7 @@ NICHES: tuple[Niche, ...] = (
         why='B2B-закупщики ищут поставщика через поиск и сравнивают КП',
         map_presence='yes',
         tg_keywords=(),
-        tg_chats=(),
+        tg_chats=('proizvodstvorossii', 'metalloobrabotka_russian', 'machinerus'),
     ),
     Niche(
         id='wholesale_building_materials',
@@ -356,7 +355,7 @@ NICHES: tuple[Niche, ...] = (
         why='Каталог с ценами, приём заявок от прорабов',
         map_presence='yes',
         tg_keywords=('стройматериалы',),
-        tg_chats=('stroimateriali_chat',),
+        tg_chats=('stroimateriali_chat', 'les_pilomaterialy', 'TimberHubInt', 'Stroitelstvo_Materialyy', 'Stroymaterialy_Moskva', 'strojmaterialy_info', 'stroymaterial63'),
     ),
     Niche(
         id='freight_logistics',
@@ -368,7 +367,7 @@ NICHES: tuple[Niche, ...] = (
         why='Калькулятор доставки и приём заявок B2B',
         map_presence='yes',
         tg_keywords=(),
-        tg_chats=(),
+        tg_chats=('rucargoru', 'gruzy_logistika_uz_chat', 'TutGruz', 'perevozlnr', 'gruzallrussia', 'gruzoperevozki_chat_bota'),
     ),
     Niche(
         id='bankruptcy_law',
@@ -380,7 +379,7 @@ NICHES: tuple[Niche, ...] = (
         why='Ниша живёт на лидах из контекста — сайт обязателен',
         map_presence='yes',
         tg_keywords=(),
-        tg_chats=(),
+        tg_chats=('pravovoy_sovetnik_chat',),
     ),
     Niche(
         id='law_firm',
@@ -392,7 +391,7 @@ NICHES: tuple[Niche, ...] = (
         why='Экспертный сайт = доверие и SEO',
         map_presence='yes',
         tg_keywords=(),
-        tg_chats=(),
+        tg_chats=('Lucent_LMC', 'chat_yuristov', 'jurrussia', 'chatyrist'),
     ),
     Niche(
         id='accounting_outsourcing',
@@ -404,7 +403,7 @@ NICHES: tuple[Niche, ...] = (
         why='Долгий LTV, лид стоит дорого — окупается сайтом',
         map_presence='yes',
         tg_keywords=(),
-        tg_chats=(),
+        tg_chats=('chekym', 'buhgalteria_rus', 'buhuslugidnr', 'topyc1C', 'Optimizatsiah'),
     ),
     Niche(
         id='private_school_courses',
@@ -416,7 +415,7 @@ NICHES: tuple[Niche, ...] = (
         why='Набор учеников через сайт и формы записи',
         map_presence='yes',
         tg_keywords=(),
-        tg_chats=(),
+        tg_chats=('avtopodol', 'torochin_center', 'uc1_1C'),
     ),
     Niche(
         id='wedding_event',
@@ -428,7 +427,7 @@ NICHES: tuple[Niche, ...] = (
         why='Визуальное портфолио, сезонные заявки',
         map_presence='yes',
         tg_keywords=(),
-        tg_chats=(),
+        tg_chats=('eventstartchat', 'eventlobby', 'eventchatroom'),
     ),
     Niche(
         id='tour_operator',
@@ -440,7 +439,7 @@ NICHES: tuple[Niche, ...] = (
         why='Каталог туров и онлайн-бронь',
         map_presence='yes',
         tg_keywords=(),
-        tg_chats=(),
+        tg_chats=('pticaturCHAT',),
     ),
     Niche(
         id='glamping_recreation',
@@ -452,7 +451,7 @@ NICHES: tuple[Niche, ...] = (
         why='Прямые брони без комиссий агрегаторов',
         map_presence='yes',
         tg_keywords=(),
-        tg_chats=(),
+        tg_chats=('besedka_karacevka', 'products_for_hotels', 'glemping_chat_baza', 'ergakicom', 'freedome_chat'),
     ),
     Niche(
         id='restaurant_banquet',
@@ -464,7 +463,7 @@ NICHES: tuple[Niche, ...] = (
         why='Банкеты и кейтеринг бронируют через сайт',
         map_presence='yes',
         tg_keywords=(),
-        tg_chats=(),
+        tg_chats=('rabota_restoran_moskva', 'povara_rf', 'restoran_topchat'),
     ),
     Niche(
         id='beauty_premium',
@@ -476,7 +475,7 @@ NICHES: tuple[Niche, ...] = (
         why='Онлайн-запись, позиционирование премиум',
         map_presence='yes',
         tg_keywords=(),
-        tg_chats=(),
+        tg_chats=('beauty_boss_chat', 'beautymosgrup', 'vladruksalon', 'trudoustroistvo_v_salon'),
     ),
     Niche(
         id='solar_security_smart_home',
@@ -488,7 +487,7 @@ NICHES: tuple[Niche, ...] = (
         why='Сложная услуга: кейсы и расчёт',
         map_presence='partly',
         tg_keywords=(),
-        tg_chats=(),
+        tg_chats=('cctvcameraroman', 'SmartHomeForum'),
     ),
 )
 
