@@ -222,7 +222,9 @@ def summary_text(req: ScrapeRequest, result: ScrapeResult) -> str:
         lines.append("\n<b>Топ по скорингу:</b>")
         for o in result.organizations[:7]:
             site = "без сайта" if not o.website else "есть сайт"
-            lines.append(f"• {html.escape(o.name[:50])} — {html.escape(o.phone.split(',')[0] or 'нет тел.')} ({site}, {o.score})")
+            lines.append(
+                f"• {html.escape(o.name[:50])} — {html.escape(o.phone.split(',')[0] or 'нет тел.')} ({site}, {o.score})"
+            )
     for err in result.errors:
         lines.append(f"\n⚠️ {html.escape(err[:200])}")
     return "\n".join(lines)
@@ -252,7 +254,10 @@ async def run_search(message: Message, req: ScrapeRequest, fmt: str, scrape_serv
     await status.edit_text(summary_text(req, result), parse_mode="HTML")
     data, ext = result.file(fmt)
     name = f"{req.niche}_{req.city}_{len(result.organizations)}.{ext}"
-    await message.answer_document(document(data, name), caption=plural(len(result.organizations), "компания", "компании", "компаний"))
+    await message.answer_document(
+        document(data, name),
+        caption=plural(len(result.organizations), "компания", "компании", "компаний"),
+    )
 
 
 @router.callback_query(F.data == "sc:go")

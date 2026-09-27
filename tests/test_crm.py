@@ -5,14 +5,9 @@
 """
 
 import importlib.util
-import os
 import sqlite3
-import sys
-import tempfile
 
 import pytest
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from crm import db as crm_db
 from crm import templates as tpl
@@ -467,7 +462,8 @@ def test_auto_improve_offer_fixes_flaws():
 
     flawed = "Здравствуйте! Сайт стоит 30000 руб - сделаем быстро. Показать? Или перезвонить?"
     improved = offer.auto_improve_offer(flawed)
-    assert "-" not in improved
+    # Спейс-дефис - след заменённого длинного тире; дефис внутри «демо-версию» законен.
+    assert " - " not in improved
     assert "30000" not in improved
     assert improved.count("?") == 1
     res = offer.classify_offer(improved)
@@ -475,15 +471,17 @@ def test_auto_improve_offer_fixes_flaws():
     assert res["checks"]["single_question"] is True
 
 
-def test_offer_api_endpoints(crm_path, scraper_path):
+def test_offer_api_endpoints(crm_path, scraper_path, monkeypatch):
     import asyncio
     import base64
+
     from aiohttp.test_utils import TestClient, TestServer
+
     from crm import app as crm_app
 
-    crm_app.USER = "admin"
-    crm_app.PASSWORD = "secret"
-    crm_db.DEFAULT_CRM_DB = crm_path
+    monkeypatch.setattr(crm_app, "USER", "admin")
+    monkeypatch.setattr(crm_app, "PASSWORD", "secret")
+    monkeypatch.setattr(crm_db, "DEFAULT_CRM_DB", crm_path)
     crm_db.import_targets(scraper_path, crm_path)
 
     async def _run():
@@ -570,15 +568,17 @@ def test_magic_token_and_session_cookie():
     assert auth.verify_session_cookie(cookie, secret="wrong-secret") is None
 
 
-def test_crm_auth_flow(crm_path):
+def test_crm_auth_flow(crm_path, monkeypatch):
     import asyncio
+
     from aiohttp.test_utils import TestClient, TestServer
+
     from crm import app as crm_app
     from crm import auth
 
-    crm_app.USER = "admin"
-    crm_app.PASSWORD = "secret"
-    crm_db.DEFAULT_CRM_DB = crm_path
+    monkeypatch.setattr(crm_app, "USER", "admin")
+    monkeypatch.setattr(crm_app, "PASSWORD", "secret")
+    monkeypatch.setattr(crm_db, "DEFAULT_CRM_DB", crm_path)
 
     async def _run():
         app = crm_app.create_app()

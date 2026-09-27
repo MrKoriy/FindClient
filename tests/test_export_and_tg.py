@@ -58,7 +58,10 @@ class TestTelegramHelpers:
         assert not SITE_REQUEST_RE.search("Нужен бетон М300 на завтра")
 
     def test_business_score(self):
-        assert _business_score("Бригада, выполним ремонт под ключ, договор", 5, True) > _business_score("привет", 1, False)
+        assert (
+            _business_score("Бригада, выполним ремонт под ключ, договор", 5, True)
+            > _business_score("привет", 1, False)
+        )
 
 
 @pytest.mark.asyncio

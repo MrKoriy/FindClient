@@ -83,7 +83,7 @@ class OrdersService:
             results = await asyncio.gather(
                 *(f(session) for f in fetchers.values()), return_exceptions=True
             )
-        for name, res in zip(fetchers, results):
+        for name, res in zip(fetchers, results, strict=True):
             if isinstance(res, BaseException):
                 self.last_errors[name] = repr(res)[:200]
                 log.warning("orders source %s failed: %r", name, res)

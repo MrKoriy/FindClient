@@ -94,15 +94,17 @@ async def _harvest(message: Message, chats: list[str], label: str, tg: TelegramU
         return
     if tg.enabled:
         await db.save_tg_leads([
-            {"user_id": l.user_id, "username": l.username, "name": l.name, "chats": l.chats}
-            for l in leads if l.user_id
+            {"user_id": lead.user_id, "username": lead.username, "name": lead.name, "chats": lead.chats}
+            for lead in leads if lead.user_id
         ], niche=label)
-    with_contact = sum(1 for l in leads if l.username or l.phone)
+    with_contact = sum(1 for lead in leads if lead.username or lead.phone)
     lines = [f"<b>«{html.escape(label)}»: {len(leads)} контактов</b>",
              f"С @username или телефоном: {with_contact}", "", "<b>Топ:</b>"]
-    for l in leads[:8]:
-        who = f"@{l.username}" if l.username else (l.phone or l.name)
-        lines.append(f"• {html.escape(who)} — {html.escape(l.name[:40])} ({l.messages} сообщ., {l.score})")
+    for lead in leads[:8]:
+        who = f"@{lead.username}" if lead.username else (lead.phone or lead.name)
+        lines.append(
+            f"• {html.escape(who)} — {html.escape(lead.name[:40])} ({lead.messages} сообщ., {lead.score})"
+        )
     await status.edit_text("\n".join(lines), parse_mode="HTML")
     data, ext = export(leads, TG_LEAD_COLUMNS, title="Telegram-лиды")
     await message.answer_document(document(data, f"tg_{label}_{len(leads)}.{ext}"), caption="Лиды из Telegram")
@@ -189,7 +191,9 @@ async def on_search_keywords(message: Message, state: FSMContext, tg_service: Te
 
 
 @router.callback_query(F.data == "tg:harvest_found")
-async def on_harvest_found(callback: CallbackQuery, state: FSMContext, tg_service: TelegramUserService, db: Database) -> None:
+async def on_harvest_found(
+    callback: CallbackQuery, state: FSMContext, tg_service: TelegramUserService, db: Database
+) -> None:
     await callback.answer()
     chats = (await state.get_data()).get("found_chats") or []
     if not chats:

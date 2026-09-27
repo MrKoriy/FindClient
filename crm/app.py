@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import base64
 import hmac
-import json
 import logging
 import os
 import pathlib
@@ -28,12 +27,12 @@ from aiohttp import web
 if __package__ in (None, ""):
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
+from dotenv import load_dotenv
+
+from crm import bai as crm_bai
 from crm import db as crm_db
 from crm import offer as crm_offer
-from crm import bai as crm_bai
 from crm import templates as tpl
-
-from dotenv import load_dotenv
 
 load_dotenv()
 load_dotenv("crm.env")
@@ -49,7 +48,6 @@ LINK = os.environ.get("CRM_LINK", "https://leonidautomations.ru/demo/")
 
 
 from crm import auth
-
 
 # --------------------------------------------------------------------------
 # Аутентификация

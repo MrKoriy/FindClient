@@ -8,7 +8,8 @@ from urllib.parse import urlparse
 # so keep these current.
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+    " (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:143.0) Gecko/20100101 Firefox/143.0",
 ]
@@ -18,7 +19,8 @@ SOCIAL_DOMAINS = (
     "odnoklassniki.ru", "t.me", "telegram.me", "wa.me", "whatsapp.com", "youtube.com",
     "youtu.be", "rutube.ru", "dzen.ru", "zen.yandex.ru", "tiktok.com", "twitter.com", "x.com",
     "max.ru", "viber.com", "viber.click", "avito.ru", "taplink.cc", "taplink.ru", "linktr.ee", "2gis.ru",
-    "yandex.ru/maps", "jivo.chat", "jivosite.com", "api.whatsapp.com", "prodoctorov.ru", "zoon.ru", "flamp.ru", "yell.ru", "profi.ru",
+    "yandex.ru/maps", "jivo.chat", "jivosite.com", "api.whatsapp.com", "prodoctorov.ru",
+    "zoon.ru", "flamp.ru", "yell.ru", "profi.ru",
 )
 
 

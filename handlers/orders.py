@@ -107,7 +107,9 @@ async def on_source(callback: CallbackQuery, orders_service: OrdersService, db: 
 
 
 _PROMPTS = {
-    "kw": (OrdersStates.keywords, "Пришлите ключевые слова через запятую (заказ подходит, если слово есть в заголовке).\n"
+    "kw": (
+        OrdersStates.keywords,
+        "Пришлите ключевые слова через запятую (заказ подходит, если слово есть в заголовке).\n"
            "Например: <i>сайт, лендинг, tilda, интернет-магазин</i>\nНапишите «сброс» для стандартного списка."),
     "minus": (OrdersStates.minus, "Пришлите минус-слова через запятую (заказы с ними пропускаются).\n"
               "Например: <i>seo, копирайт, 1с</i>\nНапишите «сброс», чтобы очистить."),
@@ -184,4 +186,7 @@ async def on_export(callback: CallbackQuery, db: Database) -> None:
         await callback.message.answer("Пока нет сохранённых подходящих заказов.")
         return
     data, ext = export(rows, ORDER_COLUMNS, title="Заказы")
-    await callback.message.answer_document(document(data, f"заказы.{ext}"), caption=plural(len(rows), "заказ", "заказа", "заказов"))
+    await callback.message.answer_document(
+        document(data, f"заказы.{ext}"),
+        caption=plural(len(rows), "заказ", "заказа", "заказов"),
+    )

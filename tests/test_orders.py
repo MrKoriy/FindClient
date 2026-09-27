@@ -1,7 +1,6 @@
 """Tests for freelance order parsers, matching and the polling service."""
 
 import pytest
-import pytest_asyncio
 
 from api.orders import (
     matches,
@@ -11,7 +10,6 @@ from api.orders import (
     parse_kwork_wants,
     parse_tg_channel,
 )
-from db.database import Database
 from models.order import Order
 from services.orders_service import ENABLED, OrdersService, format_order
 
@@ -23,7 +21,8 @@ FL_RSS = """<?xml version="1.0" encoding="utf-8"?><rss version="2.0"><channel>
 <item><title>bad</title><link>https://www.fl.ru/users/1</link></item>
 </channel></rss>"""
 
-FREELANCE_RU = """<article class="task-card"><a class="task-card__title-link" href="/task/view/11274" title="Сделать сайт">x</a>
+FREELANCE_RU = """<article class="task-card">
+<a class="task-card__title-link" href="/task/view/11274" title="Сделать сайт">x</a>
 <p class="task-card__desc">Сайт-визитка для бригады</p><span class="task-chip task-chip--cat">Веб-разработка и IT</span>
 <span class="task-card__foot-item" title="25.09.2026 19:28"></span>
 <div class="task-card__budget">
@@ -31,11 +30,14 @@ FREELANCE_RU = """<article class="task-card"><a class="task-card__title-link" hr
 
 FREELANCEJOB = """<?xml version='1.0' encoding='windows-1251' ?><rss><channel>
 <item><title>Сайт-визитка</title><link>https://www.freelancejob.ru/vacancy/77148/</link>
-<description>Нужен сайт</description><dc:date>2026-09-24 08:53:05</dc:date></item></channel></rss>"""
+<description>Нужен сайт</description>
+<dc:date>2026-09-24 08:53:05</dc:date></item></channel></rss>"""
 
-TG_HTML = """<div class="tgme_widget_message_wrap"><div class="tgme_widget_message text_not_supported_wrap js-widget_message" data-post="webfrl/4105">
+TG_HTML = """<div class="tgme_widget_message_wrap">
+<div class="tgme_widget_message text_not_supported_wrap js-widget_message" data-post="webfrl/4105">
 <div class="tgme_widget_message_text js-message_text" dir="auto">Нужен сайт на Tilda<br/>Бюджет 30к <a href="https://t.me/client_one">@client_one</a></div>
-<a class="tgme_widget_message_date" href="https://t.me/webfrl/4105"><time datetime="2026-09-17T10:01:01+00:00">x</time></a>
+<a class="tgme_widget_message_date" href="https://t.me/webfrl/4105">
+<time datetime="2026-09-17T10:01:01+00:00">x</time></a>
 </div></div>"""
 
 
@@ -92,14 +94,6 @@ class TestMatching:
 
     def test_custom_keywords(self):
         assert matches(self._o("Бот для записи", "телеграм бот"), keywords=["бот"])
-
-
-@pytest_asyncio.fixture
-async def db(tmp_path):
-    d = Database(path=str(tmp_path / "o.db"))
-    await d.connect()
-    yield d
-    await d.close()
 
 
 class TestOrdersService:

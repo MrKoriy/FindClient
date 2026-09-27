@@ -47,7 +47,7 @@ async def main() -> None:
             await qr.wait(timeout=20)
             logged_in = True
             break
-        except asyncio.TimeoutError:
+        except TimeoutError:
             try:
                 await qr.recreate()
             except Exception as exc:  # noqa: BLE001

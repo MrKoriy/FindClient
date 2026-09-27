@@ -215,7 +215,7 @@ class TwoGISApi:
                 if not via_edge:
                     TwoGISApi._direct_ok = True
                 return data
-            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
+            except (TimeoutError, aiohttp.ClientError, ValueError) as exc:
                 last = exc
                 if not via_edge:
                     TwoGISApi._direct_ok = False
@@ -234,7 +234,7 @@ class TwoGISApi:
                 html = await r.text()
             if _KEY_RE.search(html):
                 return html
-        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+        except (TimeoutError, aiohttp.ClientError) as exc:
             log.debug("2gis.ru напрямую недоступен: %s", exc)
 
         log.info("2gis.ru недоступен напрямую — беру страницу через %s", _READER.rstrip("/"))
@@ -307,7 +307,7 @@ class TwoGISApi:
             }
             try:
                 data = await self._fetch(path, p, headers)
-            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, TwoGISError) as exc:
+            except (TimeoutError, aiohttp.ClientError, ValueError, TwoGISError) as exc:
                 log.warning("2GIS API %s failed: %s", path, exc)
                 await asyncio.sleep(2 ** attempt)
                 continue

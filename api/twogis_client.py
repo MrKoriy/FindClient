@@ -17,7 +17,6 @@ import aiohttp
 from api.common import USER_AGENTS, clean_social, clean_url, is_social_url, lead_score
 from models.organization import Organization
 
-
 # Social network / messenger contact types recognized by the parser.
 _SOCIAL_TYPES = frozenset(
     ("vk", "vkontakte", "instagram", "facebook", "twitter", "youtube", "skype", "icq",

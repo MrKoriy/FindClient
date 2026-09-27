@@ -134,7 +134,7 @@ async def harvest_channels(
                 lead.messages += 1
                 lead.name = lead.name or p["text"].split("\n", 1)[0][:60]
                 lead.score = _business_score(lead.sample, lead.messages, True)
-    return sorted(leads.values(), key=lambda l: l.score, reverse=True)
+    return sorted(leads.values(), key=lambda lead: lead.score, reverse=True)
 
 
 class TelegramUserService:
@@ -259,7 +259,7 @@ class TelegramUserService:
                 joined = " ".join(texts.get(lead.user_id, []))
                 lead.score = _business_score(joined, lead.messages, bool(lead.phone or lead.username))
 
-            ranked = sorted(leads.values(), key=lambda l: l.score, reverse=True)
+            ranked = sorted(leads.values(), key=lambda lead: lead.score, reverse=True)
             for i, lead in enumerate(ranked[:with_bio], 1):
                 if on_progress and i % 10 == 0:
                     await on_progress(f"Био профилей {i}/{min(with_bio, len(ranked))}")
@@ -271,7 +271,7 @@ class TelegramUserService:
                 except Exception:
                     pass
                 await asyncio.sleep(random.uniform(0.8, 1.6))
-        return sorted(leads.values(), key=lambda l: l.score, reverse=True)
+        return sorted(leads.values(), key=lambda lead: lead.score, reverse=True)
 
     def make_site_requests_fetcher(self, chats_getter: Callable[[], Awaitable[list[str]]]):
         """Orders fetcher: new 'нужен сайт' messages in watched public groups."""

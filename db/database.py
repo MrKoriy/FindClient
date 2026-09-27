@@ -190,7 +190,7 @@ class Database:
             f"SELECT org_id, {cols} FROM organizations WHERE session_id = ?", (session_id,)
         )
         rows = await cur.fetchall()
-        return [dict(zip(("id", *_ORG_FIELDS), r)) for r in rows]
+        return [dict(zip(("id", *_ORG_FIELDS), r, strict=True)) for r in rows]
 
     async def get_history(self, limit: int = 20) -> list[dict]:
         """Return recent scrape sessions."""
@@ -344,9 +344,9 @@ class Database:
         await self._db.executemany(
             "INSERT OR IGNORE INTO tg_leads (user_id, username, name, niche, chats) VALUES (?, ?, ?, ?, ?)",
             [
-                (l["user_id"], l.get("username", ""), l.get("name", ""), niche,
-                 ", ".join(sorted(l.get("chats", []))))
-                for l in leads
+                (lead["user_id"], lead.get("username", ""), lead.get("name", ""), niche,
+                 ", ".join(sorted(lead.get("chats", []))))
+                for lead in leads
             ],
         )
         await self._db.commit()

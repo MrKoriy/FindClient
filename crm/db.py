@@ -13,11 +13,9 @@
 
 from __future__ import annotations
 
-import json
 import os
 import sqlite3
-import time
-from typing import Any, Iterable
+from typing import Any
 
 DEFAULT_CRM_DB = os.environ.get("CRM_DB", "crm.db")
 DEFAULT_SCRAPER_DB = os.environ.get("DB_PATH", "scraper.db")
@@ -235,17 +233,23 @@ def import_targets(scraper_db: str | None = None, crm_db: str | None = None) -> 
 def seed_demo_targets(crm_db: str | None = None) -> int:
     """Засевает реалистичные цели без сайта для тестирования CRM и генератора офферов."""
     demos = [
-        ("demo_1", "Клиника «ДентаЛайн»", "+79991112233", "Москва, ул. Тверская, 12", "Москва", "стоматология", 4.9, 84, "dentaline_msk"),
-        ("demo_2", "Юридическая группа «Правовед»", "+78122223344", "Санкт-Петербург, Невский пр., 45", "Санкт-Петербург", "юридические услуги", 4.8, 62, "pravoved_spb"),
-        ("demo_3", "Автосервис «Моторс Про»", "+74953334455", "Москва, Варшавское ш., 88", "Москва", "авторемонт", 4.7, 115, "motorspro_ru"),
-        ("demo_4", "Студия красоты «Элеганс»", "+79164445566", "Казань, ул. Баумана, 21", "Казань", "салон красоты", 5.0, 93, "elegance_beauty"),
-        ("demo_5", "Ремонт квартир «СтройКом»", "+78125556677", "Санкт-Петербург, пр. Просвещения, 30", "Санкт-Петербург", "ремонт квартир", 4.6, 38, "stroykom_remont"),
+        ("demo_1", "Клиника «ДентаЛайн»", "+79991112233", "Москва, ул. Тверская, 12",
+         "Москва", "стоматология", 4.9, 84, "dentaline_msk"),
+        ("demo_2", "Юридическая группа «Правовед»", "+78122223344",
+         "Санкт-Петербург, Невский пр., 45", "Санкт-Петербург", "юридические услуги", 4.8, 62, "pravoved_spb"),
+        ("demo_3", "Автосервис «Моторс Про»", "+74953334455", "Москва, Варшавское ш., 88",
+         "Москва", "авторемонт", 4.7, 115, "motorspro_ru"),
+        ("demo_4", "Студия красоты «Элеганс»", "+79164445566", "Казань, ул. Баумана, 21",
+         "Казань", "салон красоты", 5.0, 93, "elegance_beauty"),
+        ("demo_5", "Ремонт квартир «СтройКом»", "+78125556677",
+         "Санкт-Петербург, пр. Просвещения, 30", "Санкт-Петербург", "ремонт квартир", 4.6, 38, "stroykom_remont"),
     ]
     added = 0
     with connect(crm_db) as conn:
         for org_key, name, phone, addr, city, cat, rating, reviews, username in demos:
             cur = conn.execute(
-                "INSERT OR IGNORE INTO targets (org_key, name, phone, address, city, category, rating, reviews, username, status) VALUES (?,?,?,?,?,?,?,?,?, 'new')",
+                "INSERT OR IGNORE INTO targets (org_key, name, phone, address, city, category,"
+                " rating, reviews, username, status) VALUES (?,?,?,?,?,?,?,?,?, 'new')",
                 (org_key, name, phone, addr, city, cat, rating, reviews, username)
             )
             added += cur.rowcount

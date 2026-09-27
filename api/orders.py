@@ -177,8 +177,8 @@ def parse_freelancejob_rss(text: str) -> list[Order]:
     # Declared windows-1251 but actually UTF-8 and not well-formed — parse with regex.
     orders = []
     for block in re.findall(r"<item>(.*?)</item>", text, re.S):
-        def tag(name: str) -> str:
-            m = re.search(rf"<{name}>(.*?)</{name}>", block, re.S)
+        def tag(name: str, _block: str = block) -> str:
+            m = re.search(rf"<{name}>(.*?)</{name}>", _block, re.S)
             return _strip_tags(m.group(1)) if m else ""
         link = tag("link")
         m = re.search(r"/vacancy/(\d+)/", link)

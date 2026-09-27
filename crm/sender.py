@@ -23,7 +23,7 @@ import os
 import pathlib
 import random
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
@@ -67,7 +67,7 @@ def _load_env() -> None:
 
 def local_now(settings: dict) -> datetime:
     offset = int(settings.get("timezone_offset", "3"))
-    return datetime.now(timezone.utc) + timedelta(hours=offset)
+    return datetime.now(UTC) + timedelta(hours=offset)
 
 
 def in_work_hours(settings: dict) -> bool:

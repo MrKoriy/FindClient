@@ -1,21 +1,11 @@
 """Tests for services/scrape_service.py -- multi-source orchestration, merge, filters, dedup."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
-import pytest_asyncio
 
-from db.database import Database
 from models.organization import Organization
 from services.scrape_service import ScrapeRequest, ScrapeService, merge_organizations
-
-
-@pytest_asyncio.fixture
-async def db(tmp_path):
-    d = Database(path=str(tmp_path / "test.db"))
-    await d.connect()
-    yield d
-    await d.close()
 
 
 def _org(i, **kw) -> Organization:

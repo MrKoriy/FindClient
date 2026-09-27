@@ -1,7 +1,7 @@
 """Tests for config.py Settings loading and validation."""
 
-import os
 import pytest
+
 from config import Settings
 
 

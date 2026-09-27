@@ -21,16 +21,17 @@ import logging
 import os
 import re
 import time
-import urllib.request
 import urllib.error
+import urllib.request
 from typing import Any
 
 from dotenv import load_dotenv
+
 load_dotenv()
 load_dotenv("crm.env")
 
-from crm import templates as tpl
 from crm import bai
+from crm import templates as tpl
 
 log = logging.getLogger("crm.offer")
 
@@ -139,7 +140,8 @@ def synthesize_candidates(
             "id": "lost_traffic",
             "title": f"B.AI {bmodel} (скиллы РФ)",
             "text": bai_text,
-            "criteria": "Synthesized by Qwen 3.8 Flash with Russian outreach and Humanizer skills, natural tone, facts from 2GIS, loss of search traffic, zero-friction CTA",
+            "criteria": "Synthesized by Qwen 3.8 Flash with Russian outreach and Humanizer skills,"
+                        " natural tone, facts from 2GIS, loss of search traffic, zero-friction CTA",
             "source": "bai",
         })
     else:
@@ -157,7 +159,8 @@ def synthesize_candidates(
             "id": "lost_traffic",
             "title": c1_title,
             "text": c1_text,
-            "criteria": "Starts with facts, highlights search clients lost to competitors, 3-day turnaround, low-friction closing question",
+            "criteria": "Starts with facts, highlights search clients lost to competitors,"
+                        " 3-day turnaround, low-friction closing question",
             "source": "rules",
         })
 
@@ -167,7 +170,8 @@ def synthesize_candidates(
         "id": "social_only",
         "title": "Соцсети вместо сайта",
         "text": tpl.cleanup(t2),
-        "criteria": "Points out reliance on social media profiles that don't capture organic search, offers 3-day site demo",
+        "criteria": "Points out reliance on social media profiles that don't capture"
+                    " organic search, offers 3-day site demo",
         "source": "rules",
     })
 
@@ -211,7 +215,8 @@ def select_best_with_jev(
         "model": os.environ.get("TYPESAFE_MODEL", TYPESAFE_MODEL),
         "state": {
             "target": target,
-            "goal": "Select the highest-converting, safest cold message candidate to send in Telegram to a local business without a website",
+            "goal": "Select the highest-converting, safest cold message candidate to send in Telegram"
+                    " to a local business without a website",
         },
         "questions": {
             "best_offer": {
@@ -428,7 +433,7 @@ def _evaluate_cta_and_friction(text: str) -> tuple[int, list[str]]:
     lower = text.lower()
     if any(h in lower for h in high_friction):
         notes.append("Высокое трение в первом сообщении: предложение звонка/встречи/оплаты отпугивает")
-    elif any(l in lower for l in low_friction):
+    elif any(w in lower for w in low_friction):
         score += 10
     else:
         score += 5
@@ -506,10 +511,12 @@ def _call_typesafe_jev(
             "verdict": {
                 "type": "choice",
                 "criteria": {
-                    "EXCELLENT": "Strong hook, personal facts/niche, under 50 words, exactly 1 low-friction question, no price, highest response rate",
+                    "EXCELLENT": "Strong hook, personal facts/niche, under 50 words,"
+                                 " exactly 1 low-friction question, no price, highest response rate",
                     "GOOD": "Clear value, acceptable to send, slight improvements possible",
                     "NEEDS_WORK": "Too long, lacks personalization, high friction, or weak call to action",
-                    "SPAM_RISK": "Contains prices in 1st msg, external links, em-dashes, multiple questions, high complaint risk",
+                    "SPAM_RISK": "Contains prices in 1st msg, external links, em-dashes,"
+                                 " multiple questions, high complaint risk",
                 },
                 "instructions": "Evaluate the cold outreach message quality and pick the most accurate verdict.",
             }
@@ -542,14 +549,19 @@ def _call_typesafe_jev(
                     + probs.get("NEEDS_WORK", 0.0) * 55
                     + probs.get("SPAM_RISK", 0.0) * 20
                 )
-                ai_score = int(round(weighted)) if probs else (90 if choice == "EXCELLENT" else 75 if choice == "GOOD" else 55)
+                ai_score = int(round(weighted)) if probs else (
+                    90 if choice == "EXCELLENT" else 75 if choice == "GOOD" else 55
+                )
 
                 return {
                     "choice": choice,
                     "score": ai_score,
                     "confidence": confidence,
                     "probabilities": probs,
-                    "summary": f"Jev ({data.get('model', 'decision')}): вердикт {choice} (уверенность {int(confidence*100)}%)",
+                    "summary": (
+                        f"Jev ({data.get('model', 'decision')}): вердикт {choice}"
+                        f" (уверенность {int(confidence * 100)}%)"
+                    ),
                 }
         except Exception as exc:
             log.debug("TypeSafe Jev attempt %d failed: %s", attempt + 1, exc)
@@ -628,7 +640,10 @@ def classify_offer(
             "no_em_dash": "\u2014" not in text and "\u2013" not in text,
             "single_question": clean_text.count("?") == 1,
             "no_price": not bool(
-                re.search(r"\d[\d\s]{2,}\s*(руб|₽|р\.)|\bпрайс|\bстоимост|\bскидк|\bцен[аыуе]\b|\bоплат", clean_text, re.I)
+                re.search(
+                    r"\d[\d\s]{2,}\s*(руб|₽|р\.)|\bпрайс|\bстоимост|\bскидк|\bцен[аыуе]\b|\bоплат",
+                    clean_text, re.I,
+                )
             ),
             "no_broken_vars": "{" not in clean_text and "}" not in clean_text,
         },
@@ -666,6 +681,9 @@ def auto_improve_offer(
 
     # 2. Если B.AI недоступен, выполняем детерминированную очистку
     fixed = text.replace("\u2014", "-").replace("\u2013", "-")
+    # Спейс-дефис - это то же длинное тире, только замаскированное: в живых
+    # сообщениях его нет, сворачиваем в запятую.
+    fixed = re.sub(r"\s+-\s+", ", ", fixed)
 
     # Убираем цены и прайс-триггеры
     fixed = re.sub(r"\d[\d\s]{2,}\s*(руб|₽|р\.)", "демо-версию", fixed, flags=re.I)
@@ -694,13 +712,19 @@ def auto_improve_offer(
         {
             "id": "search_focus",
             "title": "Фокус на поиске",
-            "text": f"Здравствуйте! На картах у вас {facts}, но нет сайта. Клиенты из поиска уходят к конкурентам. Соберу такой сайт за три дня. Есть смысл показать концепт?",
+            "text": (
+                f"Здравствуйте! На картах у вас {facts}, но нет сайта. Клиенты из поиска уходят"
+                " к конкурентам. Соберу такой сайт за три дня. Есть смысл показать концепт?"
+            ),
             "criteria": "High response rate, points out lost search clients, 3-day turnaround, low friction",
         },
         {
             "id": "demo_focus",
             "title": "Фокус на готовом примере",
-            "text": f"Добрый день! Заметил вашу компанию на картах. Делаю конверсионные сайты для сферы {cat}. Могу прислать готовый пример под ваши услуги за пару минут. Взглянете?",
+            "text": (
+                f"Добрый день! Заметил вашу компанию на картах. Делаю конверсионные сайты"
+                f" для сферы {cat}. Могу прислать готовый пример под ваши услуги за пару минут. Взглянете?"
+            ),
             "criteria": "Respectful, value-first, offers a quick look with zero commitment",
         }
     ]

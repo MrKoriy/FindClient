@@ -1,2 +1,24 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "strict"
+filterwarnings = [
+    "ignore:datetime.datetime.utcfromtimestamp:DeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# Данные каталога ниш: длинные русские строки-описания не делим.
+"data/niches.py" = ["E501"]
+# Скрипты развёртывания загружают .env до импорта проекта - это их работа.
+"deploy/*.py" = ["E402"]
+# Точка входа и модули CRM читают переменные окружения на импорте:
+# load_dotenv() обязан отработать раньше этих импортов.
+"bot.py" = ["E402"]
+"crm/*.py" = ["E402"]

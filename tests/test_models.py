@@ -1,7 +1,7 @@
 """Tests for Organization dataclass."""
 
-from models.organization import Organization
 from models import Organization as OrganizationFromInit
+from models.organization import Organization
 
 
 class TestOrganization:

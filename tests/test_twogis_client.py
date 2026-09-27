@@ -11,8 +11,6 @@ from api.twogis_client import (
     _find_contact_groups,
     _parse_search_profiles,
 )
-from models.organization import Organization
-
 
 # --- Fixtures ---
 
