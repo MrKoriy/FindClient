@@ -134,38 +134,42 @@ class ScrapeService:
         self.proxy = proxy
 
     async def _search_2gis(self, session, query, req, need, skip, progress) -> list[Organization]:
-        api = TwoGISApi(session, request_delay=self.request_delay)
+        api = TwoGISApi(session, request_delay=self.request_delay, proxy=self.proxy)
 
         async def on_page(done: int, total: int) -> None:
             await progress(f"2GIS «{query}»: {done}/{total}")
 
         try:
-            return await api.search(
-                query, req.city, need, only_without_site=req.only_without_site,
-                skip_ids=skip, on_progress=on_page,
+            try:
+                return await api.search(
+                    query, req.city, need, only_without_site=req.only_without_site,
+                    skip_ids=skip, on_progress=on_page,
+                )
+            except Exception as exc:
+                log.warning("2GIS API failed, falling back to web pages: %s", exc)
+
+            # Fallback: page scraping (slower; 1 request per company).
+            region_id, slug, city_name = "", "moscow", req.city
+            try:
+                region_id, slug, city_name = await api.resolve_city(req.city)
+            except Exception:
+                pass
+            client = TwoGISClient(
+                session=session, request_delay=self.request_delay,
+                city_slug=slug or "moscow", city_name=city_name,
             )
-        except Exception as exc:
-            log.warning("2GIS API failed, falling back to web pages: %s", exc)
 
-        # Fallback: page scraping (slower; 1 request per company).
-        region_id, slug, city_name = "", "moscow", req.city
-        try:
-            region_id, slug, city_name = await api.resolve_city(req.city)
-        except Exception:
-            pass
-        client = TwoGISClient(
-            session=session, request_delay=self.request_delay,
-            city_slug=slug or "moscow", city_name=city_name,
-        )
+            async def on_firm(done: int, total: int) -> None:
+                await progress(f"2GIS (веб) «{query}»: карточки {done}/{total}")
 
-        async def on_firm(done: int, total: int) -> None:
-            await progress(f"2GIS (веб) «{query}»: карточки {done}/{total}")
-
-        orgs = await client.search(query if region_id else f"{query} {req.city}", need * 2, on_progress=on_firm)
-        orgs = [o for o in orgs if o.id not in skip]
-        if req.only_without_site:
-            orgs = [o for o in orgs if not o.has_website]
-        return orgs[:need]
+            orgs = await client.search(query if region_id else f"{query} {req.city}", need * 2, on_progress=on_firm)
+            orgs = [o for o in orgs if o.id not in skip]
+            if req.only_without_site:
+                orgs = [o for o in orgs if not o.has_website]
+            return orgs[:need]
+        finally:
+            # The API may have opened its own session for the DDoS-Guard edge.
+            await api.close()
 
     async def _search_yandex(self, session, query, req, need, skip, progress) -> list[Organization]:
         client = YandexMapsClient(session, api_key=self.yandex_api_key, proxy=self.proxy)
