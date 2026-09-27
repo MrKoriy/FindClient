@@ -76,14 +76,21 @@ async def auth_middleware(request: web.Request, handler):
             status=500,
         )
 
-    # 1. Путь авторизации по токену всегда доступен
-    if request.path == "/auth":
+    # 1. Пути авторизации по токену и выхода всегда доступны
+    if request.path.startswith("/auth"):
         return await handler(request)
 
     # 2. Проверка сессионной куки crm_session (от входа через Telegram-бота)
     cookie_token = request.cookies.get("crm_session")
     if cookie_token and auth.verify_session_cookie(cookie_token) is not None:
         return await handler(request)
+
+    # 2b. Проверка заголовка X-CRM-Token (для Telegram WebApp и localStorage)
+    hdr_token = request.headers.get("X-CRM-Token")
+    if hdr_token:
+        uid = auth.verify_magic_token(hdr_token) or auth.verify_session_cookie(hdr_token)
+        if uid is not None:
+            return await handler(request)
 
     # 3. Проверка прямого токена в строке запроса (?token=...)
     url_token = request.query.get("token")

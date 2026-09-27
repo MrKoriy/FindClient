@@ -2,7 +2,8 @@
 <html lang="ru" data-theme="dark">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <title>FindClient CRM: Рассылка и AI Генератор Офферов</title>
 <style>
   :root {
@@ -806,15 +807,295 @@
     to { opacity: 1; transform: translateY(0); }
   }
 
-  /* Responsive Adjustments */
-  @media (max-width: 768px) {
-    header { padding: 10px 16px; }
-    main { padding: 16px; }
-    .metrics-grid { grid-template-columns: repeat(2, 1fr); }
-    .strategy-grid { grid-template-columns: 1fr; }
+  /* ----------------------------------------------------------------------- */
+  /* Mobile Responsive Design System (Mobile-First / Telegram WebApp)        */
+  /* ----------------------------------------------------------------------- */
+
+  .mobile-tabbar {
+    display: none;
   }
+  .bottom-sheet-backdrop {
+    display: none;
+  }
+  .loader-spinner {
+    width: 28px;
+    height: 28px;
+    border: 3px solid var(--border);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 0.75s linear infinite;
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  @media (max-width: 860px) {
+    /* Hide Desktop Navigation in Header */
+    .desktop-nav {
+      display: none !important;
+    }
+
+    /* Sticky Compact Mobile Header */
+    header {
+      padding: 10px 14px;
+      gap: 10px;
+      justify-content: space-between;
+      height: 54px;
+    }
+    .brand {
+      font-size: 15px;
+      gap: 7px;
+    }
+    .brand-badge {
+      font-size: 10px;
+      padding: 2px 6px;
+    }
+    .header-actions {
+      margin-left: 0;
+      gap: 8px;
+    }
+    .worker-pill {
+      padding: 3px 8px;
+      font-size: 11px;
+    }
+
+    /* Mobile Main Content with Safe Area Padding */
+    main {
+      padding: 14px 14px calc(76px + env(safe-area-inset-bottom, 16px)) 14px;
+      max-width: 100%;
+      overflow-x: hidden;
+    }
+
+    /* Fixed Bottom Tab Bar */
+    .mobile-tabbar {
+      display: flex;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: calc(56px + env(safe-area-inset-bottom, 0px));
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+      background: var(--bg-card);
+      border-top: 1px solid var(--border);
+      z-index: 100;
+      justify-content: space-around;
+      align-items: center;
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.25);
+    }
+    .tab-item {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      height: 100%;
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      font-size: 10.5px;
+      font-weight: 500;
+      cursor: pointer;
+      padding: 4px 0;
+      transition: var(--transition);
+      text-decoration: none;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    .tab-item .icon {
+      width: 19px;
+      height: 19px;
+      stroke: var(--text-dim);
+    }
+    .tab-item:active {
+      transform: scale(0.92);
+    }
+    .tab-item.active {
+      color: var(--primary);
+      font-weight: 600;
+    }
+    .tab-item.active .icon {
+      stroke: var(--primary);
+    }
+    .tab-item.active-purple {
+      color: var(--purple);
+      font-weight: 600;
+    }
+    .tab-item.active-purple .icon {
+      stroke: var(--purple);
+    }
+
+    /* Bottom Sheet Modal for More Menu */
+    .bottom-sheet-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.65);
+      z-index: 200;
+      display: flex;
+      align-items: flex-end;
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+    }
+    .bottom-sheet {
+      width: 100%;
+      background: var(--bg-card);
+      border-top: 1px solid var(--border-strong);
+      border-radius: 18px 18px 0 0;
+      padding: 12px 16px calc(24px + env(safe-area-inset-bottom, 16px)) 16px;
+      max-height: 82vh;
+      overflow-y: auto;
+      animation: slideUpSheet 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    @keyframes slideUpSheet {
+      from { transform: translateY(100%); }
+      to { transform: translateY(0); }
+    }
+    .bottom-sheet-handle {
+      width: 40px;
+      height: 4px;
+      background: var(--border-strong);
+      border-radius: var(--radius-full);
+      margin: 0 auto 12px auto;
+    }
+    .bottom-sheet-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .bottom-sheet-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+    .bottom-sheet-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .sheet-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      padding: 12px 14px;
+      background: var(--bg-subtle);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      cursor: pointer;
+      text-align: left;
+      color: var(--text-primary);
+      transition: var(--transition);
+      min-height: 50px;
+    }
+    .sheet-item:hover, .sheet-item:active {
+      background: var(--bg-card-hover);
+      border-color: var(--border-strong);
+    }
+    .sheet-item-danger {
+      color: var(--bad);
+      border-color: var(--bad-border);
+      background: var(--bad-light);
+    }
+    .sheet-icon {
+      width: 20px;
+      height: 20px;
+      flex-shrink: 0;
+    }
+    .sheet-title {
+      font-weight: 600;
+      font-size: 13.5px;
+      line-height: 1.2;
+    }
+    .sheet-sub {
+      font-size: 11.5px;
+      color: var(--text-secondary);
+      margin-top: 2px;
+    }
+
+    /* Prevent iOS Auto-Zoom on form controls */
+    input, select, textarea {
+      font-size: 16px !important;
+    }
+
+    /* Mobile Metrics Grid */
+    .metrics-grid {
+      grid-template-columns: repeat(2, 1fr) !important;
+      gap: 10px !important;
+      margin-bottom: 16px;
+    }
+    .metric-card {
+      padding: 12px 14px;
+    }
+    .metric-head {
+      font-size: 10.5px;
+      margin-bottom: 4px;
+    }
+    .metric-value {
+      font-size: 22px;
+    }
+    .metric-sub {
+      font-size: 11px;
+      margin-top: 4px;
+    }
+
+    /* Panels & Header Reflow */
+    .panel {
+      padding: 16px 14px;
+      margin-bottom: 14px;
+    }
+    .panel-header {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 8px;
+    }
+
+    /* Offer Studio Mobile */
+    .studio-grid {
+      grid-template-columns: 1fr !important;
+      gap: 14px !important;
+    }
+    .strategy-grid {
+      grid-template-columns: 1fr !important;
+      gap: 8px !important;
+    }
+    .offer-actions {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+    }
+    .offer-actions button {
+      width: 100%;
+      min-height: 44px;
+    }
+
+    /* Table Horizontal Swipe */
+    .table-wrap {
+      border-radius: var(--radius-sm);
+      -webkit-overflow-scrolling: touch;
+    }
+    table th, table td {
+      padding: 8px 10px;
+      font-size: 12.5px;
+    }
+  }
+
   @media (max-width: 480px) {
-    .metrics-grid { grid-template-columns: 1fr; }
+    .metrics-grid {
+      grid-template-columns: repeat(2, 1fr) !important;
+    }
+    .row {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .row > * {
+      width: 100% !important;
+    }
+    button.btn {
+      min-height: 44px;
+    }
   }
 </style>
 </head>
@@ -824,10 +1105,10 @@
   <a href="#dash" class="brand">
     <svg class="icon icon-lg purple" viewBox="0 0 24 24"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
     <span>FindClient</span>
-    <span class="brand-badge">CRM 2.0</span>
+    <span class="brand-badge">2.0</span>
   </a>
 
-  <nav class="main-nav" id="mainNav"></nav>
+  <nav class="main-nav desktop-nav" id="mainNav"></nav>
 
   <div class="header-actions">
     <div class="worker-pill" id="workerIndicator" title="Состояние воркера">
@@ -841,6 +1122,71 @@
 </header>
 
 <main id="appView"></main>
+
+<nav class="mobile-tabbar" id="mobileTabBar">
+  <button class="tab-item" data-go="dash">
+    <svg class="icon" viewBox="0 0 24 24"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
+    <span>Сводка</span>
+  </button>
+  <button class="tab-item" data-go="targets">
+    <svg class="icon" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+    <span>Цели</span>
+  </button>
+  <button class="tab-item tab-highlight" data-go="offers">
+    <svg class="icon" viewBox="0 0 24 24"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
+    <span>Офферы</span>
+  </button>
+  <button class="tab-item" data-go="log">
+    <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+    <span>Журнал</span>
+  </button>
+  <button class="tab-item" id="btnMobileMore">
+    <svg class="icon" viewBox="0 0 24 24"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
+    <span id="mobileMoreLabel">Ещё</span>
+  </button>
+</nav>
+
+<div class="bottom-sheet-backdrop" id="moreSheetBackdrop" style="display:none">
+  <div class="bottom-sheet" id="moreSheet">
+    <div class="bottom-sheet-handle"></div>
+    <div class="bottom-sheet-head">
+      <div class="bottom-sheet-title">Разделы CRM</div>
+      <button class="btn btn-secondary btn-sm" id="closeMoreSheet">
+        <svg class="icon" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+    <div class="bottom-sheet-list">
+      <button class="sheet-item" data-go="groups">
+        <svg class="icon sheet-icon" viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>
+        <div class="sheet-text">
+          <div class="sheet-title">Группы для посева</div>
+          <div class="sheet-sub">133 чата по нишам</div>
+        </div>
+      </button>
+      <button class="sheet-item" data-go="tpl">
+        <svg class="icon sheet-icon" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>
+        <div class="sheet-text">
+          <div class="sheet-title">Шаблоны рассылки</div>
+          <div class="sheet-sub">Правила и переменные подстановки</div>
+        </div>
+      </button>
+      <button class="sheet-item" data-go="set">
+        <svg class="icon sheet-icon" viewBox="0 0 24 24"><line x1="4" x2="20" y1="21" y2="21"/><line x1="4" x2="20" y1="7" y2="7"/><line x1="4" x2="20" y1="14" y2="14"/><circle cx="17" cy="7" r="2"/><circle cx="9" cy="14" r="2"/><circle cx="14" cy="21" r="2"/></svg>
+        <div class="sheet-text">
+          <div class="sheet-title">Настройки шлюзов и AI</div>
+          <div class="sheet-sub">B.AI, лимиты, интервалы и ключи</div>
+        </div>
+      </button>
+      <button class="sheet-item sheet-item-danger" onclick="location.href='/auth/logout'">
+        <svg class="icon sheet-icon" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+        <div class="sheet-text">
+          <div class="sheet-title">Выйти из CRM</div>
+          <div class="sheet-sub">Сбросить сессию на устройстве</div>
+        </div>
+      </button>
+    </div>
+  </div>
+</div>
 
 <div id="toastContainer"></div>
 <dialog id="modalDialog"><div id="modalContent"></div></dialog>
@@ -882,24 +1228,52 @@ const STATUS_LABELS = {
 
 let current = location.hash.slice(1) || "dash";
 
-// API Wrapper
+// Token & Telegram WebApp Initialization
+const _urlParams = new URLSearchParams(window.location.search);
+const _tokenParam = _urlParams.get("token");
+if (_tokenParam) {
+  localStorage.setItem("crm_token", _tokenParam);
+  const _clean = window.location.pathname + window.location.hash;
+  window.history.replaceState({}, document.title, _clean);
+}
+
+if (window.Telegram && window.Telegram.WebApp) {
+  try {
+    const tg = window.Telegram.WebApp;
+    tg.ready();
+    tg.expand();
+    if (tg.enableClosingConfirmation) tg.enableClosingConfirmation();
+  } catch (_) {}
+}
+
+// API Wrapper with X-CRM-Token and credentials include
 const api = {
+  _headers() {
+    const h = { "Content-Type": "application/json" };
+    const tok = localStorage.getItem("crm_token");
+    if (tok) h["X-CRM-Token"] = tok;
+    return h;
+  },
   async get(p) {
-    const r = await fetch(p);
+    const r = await fetch(p, {
+      credentials: "include",
+      headers: this._headers(),
+    });
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
-      throw new Error(err.error || r.statusText);
+      throw new Error(err.error || r.statusText || ("HTTP " + r.status));
     }
     return r.json();
   },
   async send(p, body, method = "POST") {
     const r = await fetch(p, {
       method,
-      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      headers: this._headers(),
       body: body === undefined ? undefined : JSON.stringify(body)
     });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || r.statusText);
+    if (!r.ok) throw new Error(j.error || r.statusText || ("HTTP " + r.status));
     return j;
   }
 };
@@ -951,18 +1325,82 @@ function initTheme() {
 }
 initTheme();
 
-// Navigation Render
-function renderNav() {
-  document.getElementById("mainNav").innerHTML = VIEWS.map(([id, label, icon, highlight]) =>
-    `<button data-go="${id}" class="${id === current ? (highlight ? 'active-highlight' : 'active') : ''}">
-      ${icon} <span>${label}</span>
-    </button>`
-  ).join("");
+// Bottom Sheet Helpers
+function openMoreSheet() {
+  document.getElementById("moreSheetBackdrop").style.display = "flex";
 }
+function closeMoreSheet() {
+  document.getElementById("moreSheetBackdrop").style.display = "none";
+}
+document.getElementById("closeMoreSheet").onclick = closeMoreSheet;
+document.getElementById("moreSheetBackdrop").addEventListener("click", e => {
+  if (e.target.id === "moreSheetBackdrop") closeMoreSheet();
+});
+document.getElementById("moreSheet").addEventListener("click", e => {
+  const b = e.target.closest("[data-go]");
+  if (b) {
+    closeMoreSheet();
+    current = b.dataset.go;
+    location.hash = current;
+    route();
+  }
+});
+
+// Navigation Render (Desktop + Mobile TabBar)
+function renderNav() {
+  // 1. Desktop Nav
+  const desktopNav = document.getElementById("mainNav");
+  if (desktopNav) {
+    desktopNav.innerHTML = VIEWS.map(([id, label, icon, highlight]) =>
+      `<button data-go="${id}" class="${id === current ? (highlight ? 'active-highlight' : 'active') : ''}">
+        ${icon} <span>${label}</span>
+      </button>`
+    ).join("");
+  }
+
+  // 2. Mobile Tab Bar (dash, targets, offers, log, more)
+  const tabDash = document.querySelector('#mobileTabBar [data-go="dash"]');
+  const tabTargets = document.querySelector('#mobileTabBar [data-go="targets"]');
+  const tabOffers = document.querySelector('#mobileTabBar [data-go="offers"]');
+  const tabLog = document.querySelector('#mobileTabBar [data-go="log"]');
+  const tabMore = document.getElementById("btnMobileMore");
+  const moreLabel = document.getElementById("mobileMoreLabel");
+
+  if (tabDash) tabDash.className = "tab-item" + (current === "dash" ? " active" : "");
+  if (tabTargets) tabTargets.className = "tab-item" + (current === "targets" ? " active" : "");
+  if (tabOffers) tabOffers.className = "tab-item tab-highlight" + (current === "offers" ? " active-purple" : "");
+  if (tabLog) tabLog.className = "tab-item" + (current === "log" ? " active" : "");
+
+  const moreMap = { groups: "Группы", tpl: "Шаблоны", set: "Настройки" };
+  if (tabMore && moreLabel) {
+    if (moreMap[current]) {
+      tabMore.className = "tab-item active";
+      moreLabel.textContent = moreMap[current];
+    } else {
+      tabMore.className = "tab-item";
+      moreLabel.textContent = "Ещё";
+    }
+  }
+}
+
 document.getElementById("mainNav").addEventListener("click", e => {
   const b = e.target.closest("[data-go]"); if (!b) return;
   current = b.dataset.go; location.hash = current; route();
 });
+
+document.getElementById("mobileTabBar").addEventListener("click", e => {
+  const b = e.target.closest("[data-go]");
+  if (b) {
+    current = b.dataset.go;
+    location.hash = current;
+    route();
+    return;
+  }
+  if (e.target.closest("#btnMobileMore")) {
+    openMoreSheet();
+  }
+});
+
 window.addEventListener("hashchange", () => {
   current = location.hash.slice(1) || "dash"; route();
 });
@@ -971,7 +1409,11 @@ window.addEventListener("hashchange", () => {
 async function route() {
   renderNav();
   const v = document.getElementById("appView");
-  v.innerHTML = `<div class="panel" style="text-align:center;padding:40px"><span class="dim">Загрузка данных...</span></div>`;
+  v.innerHTML = `
+    <div class="panel" style="text-align:center;padding:48px 16px">
+      <div class="loader-spinner" style="margin:0 auto 12px auto"></div>
+      <div style="font-weight:500;color:var(--text-secondary);font-size:13.5px">Загрузка данных...</div>
+    </div>`;
   try {
     if (current === "dash") await viewDash(v);
     else if (current === "targets") await viewTargets(v);
@@ -982,7 +1424,19 @@ async function route() {
     else if (current === "set") await viewSettings(v);
     updateWorkerIndicator();
   } catch (e) {
-    v.innerHTML = `<div class="callout callout-bad">${ICONS.alert} <div><b>Ошибка загрузки:</b> ${esc(e.message)}</div></div>`;
+    v.innerHTML = `
+      <div class="panel" style="padding:20px;border-color:var(--bad-border)">
+        <div class="callout callout-bad" style="margin-bottom:14px">
+          ${ICONS.alert}
+          <div>
+            <b>Ошибка при загрузке:</b> ${esc(e.message)}
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="route()">Повторить попытку</button>
+          <button class="btn btn-secondary" onclick="location.href='/auth/logout'">Сбросить сессию</button>
+        </div>
+      </div>`;
   }
 }
 

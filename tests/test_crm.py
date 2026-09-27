@@ -587,7 +587,13 @@ def test_crm_auth_flow(crm_path):
             r = await client.get(f"/?token={token2}")
             assert r.status == 200
 
-            # 5. Logout
+            # 5. Request with X-CRM-Token header -> 200 OK
+            client.session.cookie_jar.clear()
+            token3 = auth.generate_magic_token(1432816193)
+            r = await client.get("/api/summary", headers={"X-CRM-Token": token3})
+            assert r.status == 200
+
+            # 6. Logout
             r = await client.get("/auth/logout", allow_redirects=False)
             assert r.status == 302
 
