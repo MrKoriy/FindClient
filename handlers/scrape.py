@@ -9,6 +9,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
+from api.common import messenger_link
 from data.niches import CATEGORIES, get_niche, niches_in
 from handlers.common import BACK_TO_MENU, CITIES, Progress, check, document, grid, kb, plural, safe_edit
 from services.scrape_service import SOURCE_LABELS, ScrapeRequest, ScrapeResult, ScrapeService
@@ -219,11 +220,14 @@ def summary_text(req: ScrapeRequest, result: ScrapeResult) -> str:
         f"Без сайта: {result.without_website} · с сайтом: {result.with_website}",
     ]
     if result.organizations:
-        lines.append("\n<b>Топ по скорингу:</b>")
+        lines.append("\n<b>Топ (★ - есть мессенджер, ЛПР из ЕГРЮЛ):</b>")
         for o in result.organizations[:7]:
             site = "без сайта" if not o.website else "есть сайт"
+            star = "★ " if messenger_link(o.socials) else ""
+            head = f" · {html.escape(o.director)}" if o.director else ""
             lines.append(
-                f"• {html.escape(o.name[:50])} — {html.escape(o.phone.split(',')[0] or 'нет тел.')} ({site}, {o.score})"
+                f"• {star}{html.escape(o.name[:50])} — "
+                f"{html.escape(o.phone.split(',')[0] or 'нет тел.')} ({site}, {o.score}){head}"
             )
     for err in result.errors:
         lines.append(f"\n⚠️ {html.escape(err[:200])}")
@@ -275,6 +279,7 @@ async def on_go(callback: CallbackQuery, state: FSMContext, scrape_service: Scra
     req = ScrapeRequest(
         queries=tuple(d["queries"]), city=d["city"], count=d["count"], sources=tuple(d["sources"]),
         only_without_site=d["no_site"], only_with_phone=d["phone"], label=d["label"],
+        enrich_egrul=True,
     )
     try:
         await callback.message.edit_reply_markup(reply_markup=None)
@@ -303,6 +308,6 @@ async def cmd_find(message: Message, command: CommandObject, scrape_service: Scr
     all_sites = any(p.lower() in ("все", "all") for p in parts[1:])
     req = ScrapeRequest(
         queries=queries, city=city, count=min(count, 1000),
-        only_without_site=not all_sites, only_with_phone=True,
+        only_without_site=not all_sites, only_with_phone=True, enrich_egrul=True,
     )
     await run_search(message, req, "xlsx", scrape_service)

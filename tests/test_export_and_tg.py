@@ -16,13 +16,23 @@ from services.telegram_service import PHONE_RE, SITE_REQUEST_RE, _business_score
 class TestExport:
 
     def test_xlsx_has_headers_links_and_filter(self):
-        orgs = [Organization(id="1", name="Ромашка", website="romashka.ru", url="https://2gis.ru/moscow/firm/1")]
+        orgs = [
+            Organization(
+                id="1", name="Ромашка", website="romashka.ru",
+                url="https://2gis.ru/moscow/firm/1", socials="https://t.me/romashka",
+                director="Иванова Анна Петровна (директор)", inn="1655000000",
+            )
+        ]
         wb = load_workbook(io.BytesIO(to_xlsx(orgs, ORG_COLUMNS)))
         ws = wb.active
         headers = [c.value for c in ws[1]]
-        assert headers[:4] == ["Название", "Телефон", "Email", "Сайт"]
+        assert headers[:6] == ["Название", "Телефон", "Мессенджер ★", "ЛПР (ЕГРЮЛ)", "ИНН", "Email"]
         assert ws.cell(row=2, column=1).value == "Ромашка"
-        assert ws.cell(row=2, column=4).hyperlink.target == "https://romashka.ru"
+        assert ws.cell(row=2, column=3).value == "https://t.me/romashka"
+        assert ws.cell(row=2, column=3).hyperlink.target == "https://t.me/romashka"
+        assert ws.cell(row=2, column=4).value == "Иванова Анна Петровна (директор)"
+        assert ws.cell(row=2, column=7).hyperlink.target == "https://romashka.ru"
+        assert "rusprofile.ru" in ws.cell(row=2, column=18).value
         assert ws.freeze_panes == "A2" and ws.auto_filter.ref
 
     def test_csv_semicolon_bom_and_sets(self):

@@ -71,12 +71,15 @@ _MIGRATIONS = {
         ("branches", "INTEGER NOT NULL DEFAULT 0"),
         ("url", "TEXT NOT NULL DEFAULT ''"),
         ("score", "INTEGER NOT NULL DEFAULT 0"),
+        ("director", "TEXT NOT NULL DEFAULT ''"),
+        ("inn", "TEXT NOT NULL DEFAULT ''"),
     ],
 }
 
 _ORG_FIELDS = (
     "name", "phone", "email", "website", "address", "rating", "socials",
     "source", "city", "category", "reviews", "branches", "url", "score",
+    "director", "inn",
 )
 _ORG_DEFAULTS = {"rating": 0.0, "reviews": 0, "branches": 0, "score": 0, "source": "2gis"}
 

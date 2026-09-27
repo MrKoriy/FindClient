@@ -2119,11 +2119,12 @@ async function viewTargets(v) {
                 <div style="font-weight:600">${esc(t.name) || "<span class='dim'>без названия</span>"}</div>
                 <div class="dim" style="font-size:12px">${esc(t.category) || "-"}</div>
                 ${t.address ? `<div class="text-dim" style="font-size:11px">${esc(t.address)}</div>` : ""}
+                ${t.director ? `<div class="text-dim" style="font-size:11px">ЛПР: ${esc(t.director)}</div>` : ""}
               </td>
               <td>
                 <div class="mono">${esc(t.phone) || "-"}</div>
                 ${t.username ? `<div class="mono ok" style="font-weight:600">@${esc(t.username)}</div>` : `<div class="text-dim mono" style="font-size:11px">нет @username</div>`}
-                ${t.socials ? `<div class="text-dim mono" style="font-size:11px">${esc(t.socials.split(",")[0])}</div>` : ""}
+                ${t.socials ? `<div class="text-dim mono" style="font-size:11px">${/(?:t\.me|wa\.me)\//.test(t.socials) ? "★ " : ""}${esc(t.socials.split(",")[0])}</div>` : ""}
               </td>
               <td>
                 <div style="display:flex;align-items:center;gap:4px">

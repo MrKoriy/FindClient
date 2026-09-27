@@ -5,10 +5,13 @@ import csv
 import io
 from collections.abc import Sequence
 from typing import Any
+from urllib.parse import quote_plus
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
+
+from api.common import messenger_link
 
 # (attribute, header, column width)
 Column = tuple[str, str, int]
@@ -16,6 +19,9 @@ Column = tuple[str, str, int]
 ORG_COLUMNS: list[Column] = [
     ("name", "Название", 36),
     ("phone", "Телефон", 22),
+    ("messenger", "Мессенджер ★", 30),
+    ("director", "ЛПР (ЕГРЮЛ)", 30),
+    ("inn", "ИНН", 14),
     ("email", "Email", 26),
     ("website", "Сайт", 28),
     ("address", "Адрес", 40),
@@ -28,6 +34,7 @@ ORG_COLUMNS: list[Column] = [
     ("source", "Источник", 10),
     ("score", "Скоринг", 9),
     ("url", "Карточка", 30),
+    ("revenue_check", "Выручка?", 26),
 ]
 
 TG_LEAD_COLUMNS: list[Column] = [
@@ -58,6 +65,15 @@ _ZEBRA_FILL = PatternFill("solid", fgColor="F2F6FC")
 
 
 def _cell(item: Any, attr: str) -> Any:
+    # Вычисляемые колонки: работают и для Organization, и для строк истории из БД.
+    if attr == "messenger":
+        return messenger_link(str(_cell(item, "socials") or ""))
+    if attr == "revenue_check":
+        name = str(_cell(item, "name") or "").strip()
+        if not name:
+            return ""
+        city = str(_cell(item, "city") or "").strip()
+        return "https://www.rusprofile.ru/search?query=" + quote_plus(f"{name} {city}".strip())
     value = getattr(item, attr, "") if not isinstance(item, dict) else item.get(attr, "")
     if value is None:
         return ""
@@ -89,7 +105,10 @@ def to_xlsx(items: Sequence[Any], columns: list[Column], title: str = "Лиды"
         cell.alignment = Alignment(vertical="center", wrap_text=True)
         ws.column_dimensions[get_column_letter(idx)].width = width
 
-    link_cols = {i for i, c in enumerate(columns, 1) if c[0] in ("url", "link", "website")}
+    link_cols = {
+        i for i, c in enumerate(columns, 1)
+        if c[0] in ("url", "link", "website", "messenger", "revenue_check")
+    }
     for row_idx, item in enumerate(items, 2):
         for col_idx, (attr, _, _) in enumerate(columns, 1):
             value = _cell(item, attr)

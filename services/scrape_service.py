@@ -8,7 +8,7 @@ from pathlib import Path
 
 import aiohttp
 
-from api.common import name_key, phone_key
+from api.common import is_mobile_phone, messenger_link, mobile_numbers, name_key, phone_key
 from api.twogis_api import TwoGISApi
 from api.twogis_client import TwoGISClient
 from api.yandex_client import YandexMapsClient
@@ -19,6 +19,14 @@ from services.export import ORG_COLUMNS, export_async, to_csv
 log = logging.getLogger(__name__)
 
 SOURCE_LABELS = {"2gis": "2GIS", "yandex": "Яндекс Карты"}
+
+# Мёртвые точки выкидываем по отзывам: 0-1 отзыв = карточка-зомби. В Москве
+# конкуренция и плотность выше, планка выше.
+_MOSCOW = {"москва", "moscow", "msk"}
+
+
+def min_reviews_for(city: str) -> int:
+    return 4 if (city or "").strip().lower().replace("ё", "е") in _MOSCOW else 2
 
 Progress = Callable[[str], Awaitable[None]]
 
@@ -31,6 +39,8 @@ class ScrapeRequest:
     sources: tuple[str, ...] = ("2gis", "yandex")
     only_without_site: bool = False
     only_with_phone: bool = False
+    # ФИО руководителя из ЕГРЮЛ: +1-2 запроса на компанию, поэтому опция.
+    enrich_egrul: bool = False
     label: str = ""  # history key; defaults to the first query
 
     @property
@@ -44,6 +54,8 @@ class ScrapeRequest:
             parts.append("без сайта")
         if self.only_with_phone:
             parts.append("с телефоном")
+        parts.append(f"отзывов ≥ {min_reviews_for(self.city)}")
+        parts.append("мобильный или мессенджер")
         return ", ".join(parts)
 
 
@@ -242,10 +254,30 @@ class ScrapeService:
         fresh = [o for o in unique if o.id not in known and phone_key(o.phone) not in known_phones]
         if req.only_without_site:
             fresh = [o for o in fresh if not o.has_website]
+
+        # Качество лида: живая точка (отзывы) + достижимый контакт
+        # (мобильный или мессенджер из карточки). Отсекает ~85% мёртвых.
+        min_reviews = min_reviews_for(req.city)
+        fresh = [o for o in fresh if o.reviews >= min_reviews]
+        fresh = [o for o in fresh if is_mobile_phone(o.phone) or messenger_link(o.socials)]
+        # В колонке «Телефон» остаются только мобильные: городские и 8-800
+        # для мессенджер-охоты бесполезны.
+        for o in fresh:
+            o.phone = mobile_numbers(o.phone)
         if req.only_with_phone:
-            fresh = [o for o in fresh if o.phone]
-        fresh.sort(key=lambda o: o.score, reverse=True)
+            fresh = [o for o in fresh if o.phone or messenger_link(o.socials)]
+
+        # Мессенджер в карточке - метка хозяина: приоритет и в скоринге, и сверху списка.
+        for o in fresh:
+            if messenger_link(o.socials):
+                o.score = min(100, o.score + 10)
+        fresh.sort(key=lambda o: (not messenger_link(o.socials), -o.score))
         fresh = fresh[: req.count]
+
+        if req.enrich_egrul:
+            timeout = aiohttp.ClientTimeout(total=30)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                await self._enrich_directors(session, fresh, progress)
 
         if fresh:
             await self.db.save_session(
@@ -261,3 +293,34 @@ class ScrapeService:
             per_source=per_source,
             errors=errors,
         )
+
+    async def _enrich_directors(self, session, orgs, progress) -> None:
+        """ФИО руководителя из ЕГРЮЛ/ЕГРИП по имени из карточки.
+
+        Мягкий провал: сервис молчит или совпадения нет - колонка ЛПР просто
+        остаётся пустой, сбор от этого не ломается. Четыре воркера, чтобы
+        очередь в 50 компаний не растягивалась на минуты.
+        """
+        from api.egrul import EgrulClient
+
+        client = EgrulClient(session)
+        sem = asyncio.Semaphore(4)
+        done = 0
+
+        async def one(org: Organization) -> None:
+            nonlocal done
+            async with sem:
+                try:
+                    info = await client.find_director(org.name, org.city)
+                except Exception as exc:
+                    log.debug("ЕГРЮЛ «%s»: %s", org.name, exc)
+                    info = None
+            if info:
+                org.director = f"{info['director']} ({info['position']})"
+                org.inn = info["inn"]
+            done += 1
+            if progress and (done % 10 == 0 or done == len(orgs)):
+                await progress(f"ЕГРЮЛ: руководители {done}/{len(orgs)}")
+
+        await asyncio.gather(*(one(o) for o in orgs))
+

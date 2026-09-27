@@ -65,6 +65,50 @@ def phone_key(phone: str) -> str:
     return digits[-10:] if len(digits) >= 10 else ""
 
 
+def _digits(part: str) -> str:
+    return "".join(ch for ch in part if ch.isdigit())
+
+
+def is_mobile_phone(phone: str) -> bool:
+    """Есть ли среди номеров мобильный: последние 10 цифр начинаются на «9».
+
+    Городские (495/499/496 и любые коды городов), 8-800 и зарубежные
+    отсекаются: по ним до ЛПР в мессенджере не достучаться.
+    """
+    for part in (phone or "").split(","):
+        digits = _digits(part)
+        if len(digits) >= 10 and digits[-10] == "9":
+            return True
+    return False
+
+
+def mobile_numbers(phone: str) -> str:
+    """Только мобильные номера из строки телефонов (для колонки «Телефон»)."""
+    kept = [
+        part.strip() for part in (phone or "").split(",")
+        if len(_digits(part)) >= 10 and _digits(part)[-10] == "9"
+    ]
+    return ", ".join(kept)
+
+
+_MESSENGER_RE = re.compile(
+    r"(?:https?://)?(?:t\.me|telegram\.me|wa\.me)/[A-Za-z0-9_]+", re.I
+)
+
+
+def messenger_link(socials: str) -> str:
+    """Первая ссылка t.me/wa.me из соцсетей карточки — приоритетный контакт.
+
+    У малого бизнеса такую ссылку почти всегда оставляет сам хозяин:
+    это ближайший путь к ЛПР без звонков и секретарей.
+    """
+    m = _MESSENGER_RE.search(socials or "")
+    if not m:
+        return ""
+    link = m.group(0)
+    return link if link.startswith("http") else "https://" + link
+
+
 def name_key(name: str, address: str = "") -> str:
     text = f"{name}|{address}".lower().replace("ё", "е")
     return re.sub(r"[^a-zа-я0-9|]", "", text)

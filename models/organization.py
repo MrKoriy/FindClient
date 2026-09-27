@@ -26,6 +26,9 @@ class Organization:
     branches: int = 0
     url: str = ""
     score: int = 0
+    # ЛПР из ЕГРЮЛ/ЕГРИП: «Фамилия Имя Отчество (должность)».
+    director: str = ""
+    inn: str = ""
 
     @property
     def has_website(self) -> bool:

@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS targets (
     source      TEXT    NOT NULL DEFAULT '',
     status      TEXT    NOT NULL DEFAULT 'new',
     note        TEXT    NOT NULL DEFAULT '',
+    director    TEXT    NOT NULL DEFAULT '',   -- ЛПР из ЕГРЮЛ: «ФИО (должность)»
     created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
     updated_at  TEXT    NOT NULL DEFAULT (datetime('now')),
     UNIQUE (org_key)
@@ -189,7 +190,9 @@ async def init_db(path: str | None = None) -> None:
 # на живой базе молча ничего не делает, и первая же запись в новую колонку
 # падает «no such column». Здесь тот же приём, что у бота в db/database.py.
 _COLUMN_MIGRATIONS: dict[str, list[tuple[str, str]]] = {
-    # "targets": [("telegram_id", "INTEGER")],
+    "targets": [
+        ("director", "TEXT NOT NULL DEFAULT ''"),
+    ],
 }
 
 
@@ -231,13 +234,22 @@ async def log_event(kind: str, text: str, path: str | None = None) -> None:
 # --------------------------------------------------------------------------
 
 def _read_organizations(scraper_db: str) -> list[sqlite3.Row]:
-    """Синхронное чтение каталога компаний (его выполняем в отдельном потоке)."""
+    """Синхронное чтение каталога компаний (его выполняем в отдельном потоке).
+
+    Колонка director появилась позже: если бот ещё ни разу не запускался
+    после апгрейда, её может не быть - читаем без неё.
+    """
     src = sqlite3.connect(scraper_db)
     src.row_factory = sqlite3.Row
-    rows = src.execute(
+    cur = src.execute("PRAGMA table_info(organizations)")
+    has_director = any(r[1] == "director" for r in cur.fetchall())
+    select = (
         "SELECT org_id, session_id, name, phone, email, website, socials, address,"
-        "       city, category, rating, reviews, source FROM organizations"
-    ).fetchall()
+        " city, category, rating, reviews, source"
+    )
+    if has_director:
+        select += ", director"
+    rows = src.execute(f"{select} FROM organizations").fetchall()
     src.close()
     return rows
 
@@ -264,13 +276,14 @@ async def import_targets(scraper_db: str | None = None, crm_db: str | None = Non
             cur = await conn.execute(
                 "INSERT OR IGNORE INTO targets"
                 " (org_key, name, phone, email, website, socials, address, city,"
-                "  category, rating, reviews, source, status)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "  category, rating, reviews, source, status, director)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     org_key, r["name"] or "", r["phone"] or "", r["email"] or "",
                     r["website"] or "", r["socials"] or "", r["address"] or "",
                     r["city"] or "", r["category"] or "", r["rating"] or 0,
                     r["reviews"] or 0, r["source"] or "", status,
+                    (r["director"] if "director" in r.keys() else "") or "",
                 ),
             )
             added += cur.rowcount
@@ -342,9 +355,13 @@ async def list_targets(
         )
         args += [f"%{search}%"] * 6
     clause = ("WHERE " + " AND ".join(where)) if where else ""
+    # Сначала компании с мессенджером в контактах (t.me/wa.me): это ближайший
+    # путь к ЛПР, такие цели дороже остальных.
+    order = ("(socials LIKE '%t.me/%' OR socials LIKE '%wa.me/%') DESC,"
+             " reviews DESC, rating DESC")
     async with connect(crm_db) as conn:
         cur = await conn.execute(
-            f"SELECT * FROM targets {clause} ORDER BY reviews DESC, rating DESC"
+            f"SELECT * FROM targets {clause} ORDER BY {order}"
             f" LIMIT ? OFFSET ?",
             (*args, limit, offset),
         )
