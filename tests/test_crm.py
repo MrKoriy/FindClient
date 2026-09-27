@@ -707,3 +707,44 @@ async def test_non_numeric_params_return_400_not_500(crm_path, monkeypatch):
         for url in ("/api/targets?limit=abc", "/api/messages?limit=zz", "/api/targets?offset=x"):
             r = await client.get(url)
             assert r.status == 400, url
+
+
+# ---------------------------------------------------------------- ЛПР в шаблонах
+
+def test_director_address_forms():
+    assert tpl.director_address("Овечкина Мария Вячеславовна (директор)") == "Мария Вячеславовна"
+    assert tpl.director_address("Иванов Пётр Сидорович") == "Пётр Сидорович"
+    assert tpl.director_address("Ахметов Рустам") == "Рустам"
+    assert tpl.director_address("") == ""
+    assert tpl.director_address(None) == ""
+
+
+def test_render_personalizes_greeting():
+    target = {"name": "Мадин", "reviews": 91, "rating": 5.0, "director": "Овечкина Мария Вячеславовна (директор)"}
+    text = tpl.render(tpl.DEFAULT_TEMPLATES[0]["body"], target)
+    assert text.startswith("Здравствуйте, Мария Вячеславовна!")
+    assert "{" not in text and "Овечкина" not in text
+
+
+def test_render_degrades_without_director():
+    """Нет ЛПР - обычное «Здравствуйте!», без висячей запятой и мусора."""
+    text = tpl.render(tpl.DEFAULT_TEMPLATES[0]["body"], {"name": "Мадин", "reviews": 5})
+    assert text.startswith("Здравствуйте!")
+    assert ", !" not in text and "  " not in text
+
+
+def test_cleanup_drops_dangling_comma():
+    assert tpl.cleanup("Здравствуйте, !") == "Здравствуйте!"
+    assert tpl.cleanup("Привет, .") == "Привет."
+    # живой текст с обращением не трогаем
+    assert tpl.cleanup("Здравствуйте, Мария!") == "Здравствуйте, Мария!"
+
+
+def test_pick_variant_keeps_comma_greeting():
+    body = "Здравствуйте, {director}! Текст сообщения. Есть смысл?"
+    v1 = tpl.pick_variant(body, "a")
+    v2 = tpl.pick_variant(body, "b")
+    assert {v1, v2} == {
+        "Здравствуйте, {director}! Текст сообщения. Есть смысл?",
+        "Добрый день, {director}! Текст сообщения. Есть смысл?",
+    }

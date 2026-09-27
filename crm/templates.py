@@ -33,7 +33,7 @@ SIMPLE_PLACEHOLDERS = (
     "name", "reviews", "rating", "address", "city", "category", "phone", "link",
 )
 # Вычисляемые - уже в правильной форме.
-COMPUTED_PLACEHOLDERS = ("facts",)
+COMPUTED_PLACEHOLDERS = ("facts", "director")
 PLACEHOLDERS = SIMPLE_PLACEHOLDERS + COMPUTED_PLACEHOLDERS
 
 WORD_LIMIT = 50
@@ -48,7 +48,7 @@ DEFAULT_TEMPLATES = [
         "name": "Карточка без сайта",
         "category": "",
         "body": (
-            "Здравствуйте! Нашёл вас на картах: {facts}. Сайта нет, а те, кто "
+            "Здравствуйте, {director}! Нашёл вас на картах: {facts}. Сайта нет, а те, кто "
             "ищет вас в поиске, до карточки не доходят. Собираю такие сайты за "
             "три дня. Есть смысл говорить дальше?"
         ),
@@ -57,7 +57,7 @@ DEFAULT_TEMPLATES = [
         "name": "Соцсети вместо сайта",
         "category": "",
         "body": (
-            "Здравствуйте! На картах у вас {facts}, а вместо сайта только "
+            "Здравствуйте, {director}! На картах у вас {facts}, а вместо сайта только "
             "страница в соцсетях, которую вы не контролируете. Те, кто ищет вас "
             "в поиске, до неё не доходят. Собираю такие сайты за три дня. "
             "Посмотреть, как это будет на ваших услугах?"
@@ -109,6 +109,22 @@ def rating_phrase(rating) -> str:
     return f"{value:.1f}".replace(".", ",")
 
 
+def director_address(director: str) -> str:
+    """«Овечкина Мария Вячеславовна (директор)» -> «Мария Вячеславовна».
+
+    Обращение по имени-отчеству из ФИО руководителя: фамилия и должность
+    в приветствии не нужны. Пусто/не распозналось - пустая строка, шаблон
+    тогда деградирует в обычное «Здравствуйте!».
+    """
+    name = (director or "").split("(")[0].strip()
+    parts = name.split()
+    if len(parts) >= 3:
+        return " ".join(parts[-2:])  # имя + отчество
+    if len(parts) == 2:
+        return parts[-1]
+    return name
+
+
 def facts_phrase(target: dict) -> str:
     """«5,0 и 91 отзыв» / «5,0» / «91 отзыв» / пусто.
 
@@ -139,6 +155,7 @@ def render(body: str, target: dict, link: str = "", with_link: bool = True) -> s
         "phone": (target.get("phone") or "").strip(),
         "link": link.strip(),
         "facts": facts_phrase(target),
+        "director": director_address(target.get("director", "")),
     }
 
     text = body
@@ -165,6 +182,8 @@ def cleanup(text: str) -> str:
     text = re.sub(r"[ \t]{2,}", " ", text)
     # «: .» и «: ,» - переменная оказалась пустой
     text = re.sub(r"[:\-]\s*(?=[.,;!?])", "", text)
+    # «Здравствуйте, !» - {director} не подставился: убираем висячую запятую
+    text = re.sub(r",\s*(?=[.!?;])", "", text)
     text = re.sub(r"\s+([,.;:!?])", r"\1", text)
     # «и .» / «и ,» - союз остался без второго члена
     text = re.sub(r"\s+и\s*(?=[.,;!?])", "", text)
@@ -181,7 +200,7 @@ def check(body: str, with_link: bool = True) -> list[str]:
     sample = {
         "name": "Тест", "reviews": 91, "rating": 5.0, "address": "ул. Тестовая, 1",
         "city": "Санкт-Петербург", "category": "юридические услуги",
-        "phone": "+78120000000",
+        "phone": "+78120000000", "director": "Иванова Мария Петровна (директор)",
     }
     text = render(body, sample, link="https://example.com", with_link=with_link)
 
@@ -233,10 +252,11 @@ def pick_variant(body: str, seed: str | None = None) -> str:
 
     Одинаковые тела сообщений - самый явный признак рассылки. Меняем ровно
     одно слово, но этого достаточно, чтобы два сообщения не были байт-в-байт
-    одинаковыми.
+    одинаковыми. Знак после приветствия не трогаем: за словом может идти
+    запятая перед обращением к ЛПР.
     """
-    greetings = ("Здравствуйте!", "Добрый день!", "Здравствуйте.", "Добрый день.")
+    greetings = ("Здравствуйте", "Добрый день")
     rnd = random.Random(seed) if seed is not None else random
     return re.sub(
-        r"^(Здравствуйте|Добрый день)[!.]", rnd.choice(greetings), body, count=1
+        r"^(Здравствуйте|Добрый день)(?=[!.,])", rnd.choice(greetings), body, count=1
     )
