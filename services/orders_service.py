@@ -109,6 +109,7 @@ class OrdersService:
 
         sent: dict[int, list[Order]] = {}
         matched_uids: set[str] = set()
+        delivered_uids: set[str] = set()
         for chat_id, cfg in configs.items():
             hits = [
                 o for o in new_orders
@@ -122,14 +123,19 @@ class OrdersService:
                 for o in hits:
                     try:
                         await self.sender(chat_id, format_order(o))
+                        delivered_uids.add(o.uid)
                     except Exception as exc:
                         log.warning("send to %s failed: %s", chat_id, exc)
                     await asyncio.sleep(0.05)
 
+        # Провалившаяся доставка не «съедает» заказ: uid остаётся непросмотренным
+        # и уйдёт подписчикам в следующем опросе. Помечаем доставленное и всё,
+        # что никому не подошло (matched=False, ретраить незачем).
         await self.db.mark_orders_seen([
             {"uid": o.uid, "source": o.source, "title": o.title, "url": o.url,
              "budget": o.budget, "matched": o.uid in matched_uids}
             for o in new_orders
+            if o.uid in delivered_uids or o.uid not in matched_uids
         ])
         return sent
 

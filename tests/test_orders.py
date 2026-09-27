@@ -132,6 +132,33 @@ class TestOrdersService:
         assert len(await db.recent_matched_orders()) == 2
 
     @pytest.mark.asyncio
+    async def test_failed_delivery_keeps_order_unseen(self, db, monkeypatch):
+        """Провалившаяся доставка не должна помечать заказ просмотренным: он уйдёт в следующем опросе."""
+        orders = [Order("kwork", "1", "Создать сайт", "u1"), Order("kwork", "2", "Лендинг для кафе", "u2")]
+
+        async def fetch_all(sources, channels):
+            return orders
+
+        async def sender(chat_id, text):
+            if "u2" in text:
+                raise RuntimeError("rate limited")
+
+        svc = OrdersService(db, sender=sender)
+        monkeypatch.setattr(svc, "fetch_all", fetch_all)
+        await db.set_setting(7, ENABLED, True)
+
+        await svc.poll_once()
+        assert (await db.get_stats())["orders_seen"] == 1
+
+        # Второй опрос: недоставленный заказ всё ещё новый и снова уходит в доставку.
+        async def ok_sender(chat_id, text):
+            pass
+
+        svc.sender = ok_sender
+        await svc.poll_once()
+        assert (await db.get_stats())["orders_seen"] == 2
+
+    @pytest.mark.asyncio
     async def test_no_subscribers_no_fetch(self, db, monkeypatch):
         svc = OrdersService(db)
 

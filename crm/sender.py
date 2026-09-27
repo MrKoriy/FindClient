@@ -40,6 +40,9 @@ API_HASH = os.environ.get("TG_API_HASH", "")
 # столько в процессе нет, лучше честно выйти и дать systemd перезапустить.
 MAX_INLINE_WAIT = 3600
 POLL_EMPTY = 30
+# Пауза перед повтором после долгого FloodWait: лимит снимется не скоро,
+# но и в пустую молотить каждые 30 секунд незачем.
+FLOOD_RETRY_PAUSE = 300
 
 
 def _load_env() -> None:
@@ -100,25 +103,26 @@ async def send_one(client, message: dict, settings: dict) -> tuple[str, str, int
 
     from telethon.errors import FloodWaitError, PeerFloodError, UserPrivacyRestrictedError
 
-    try:
-        entity = await client.get_entity("@" + chat.lstrip("@"))
-        sent = await client.send_message(entity, message["body"])
-        return "sent", "", getattr(sent, "id", None)
-    except FloodWaitError as exc:
-        # Это не отказ, а просьба подождать. Сообщение возвращаем в очередь,
-        # чтобы оно не потерялось.
-        wait = int(exc.seconds)
-        log.warning("FloodWait %s с (~%.1f ч)", wait, wait / 3600)
-        if wait > MAX_INLINE_WAIT:
-            return "queued", f"FloodWait {wait} с", None
-        await asyncio.sleep(wait + 5)
-        return "queued", f"подождали {wait} с", None
-    except PeerFloodError:
-        return "failed", "PEER_FLOOD: аккаунт ограничен для сообщений незнакомым", None
-    except UserPrivacyRestrictedError:
-        return "failed", "приватность получателя запрещает сообщения", None
-    except Exception as exc:  # noqa: BLE001
-        return "failed", f"{type(exc).__name__}: {str(exc)[:200]}", None
+    # Две попытки: короткий FloodWait честно отрабатывается сном и повтором,
+    # долгий - возвращается наверх как "queued", сообщение остаётся в очереди.
+    for attempt in range(2):
+        try:
+            entity = await client.get_entity("@" + chat.lstrip("@"))
+            sent = await client.send_message(entity, message["body"])
+            return "sent", "", getattr(sent, "id", None)
+        except FloodWaitError as exc:
+            wait = int(exc.seconds)
+            log.warning("FloodWait %s с (~%.1f ч)", wait, wait / 3600)
+            if wait > MAX_INLINE_WAIT or attempt == 1:
+                return "queued", f"FloodWait {wait} с", None
+            await asyncio.sleep(wait + 5)
+        except PeerFloodError:
+            return "failed", "PEER_FLOOD: аккаунт ограничен для сообщений незнакомым", None
+        except UserPrivacyRestrictedError:
+            return "failed", "приватность получателя запрещает сообщения", None
+        except Exception as exc:  # noqa: BLE001
+            return "failed", f"{type(exc).__name__}: {str(exc)[:200]}", None
+    return "failed", "FloodWait не отработал за две попытки", None
 
 
 async def run_once(client, crm_path: str | None = None) -> bool:
@@ -150,10 +154,13 @@ async def run_once(client, crm_path: str | None = None) -> bool:
     log.info("отправляю @%s (%s/%s за сегодня)", message["chat"], today + 1, cap)
     status, error, tg_id = await send_one(client, message, settings)
     if status == "queued":
-        # Возвращаем в очередь, но помечаем, чтобы не зациклиться на одном.
-        crm_db.mark_message(message["id"], "failed", error, tg_id, crm_path)
-    else:
-        crm_db.mark_message(message["id"], status, error, tg_id, crm_path)
+        # Долгий FloodWait: проваленным сообщение НЕ помечаем - оно остаётся
+        # в очереди и уйдёт после снятия лимита. Пауза здесь, чтобы main()
+        # не долбил по тому же лимиту раз в секунду.
+        log.warning("  -> %s %s (остаётся в очереди)", status, error)
+        await asyncio.sleep(FLOOD_RETRY_PAUSE)
+        return True
+    crm_db.mark_message(message["id"], status, error, tg_id, crm_path)
     log.info("  -> %s %s", status, error)
 
     if status == "sent":

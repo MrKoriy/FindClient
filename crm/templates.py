@@ -161,7 +161,7 @@ def cleanup(text: str) -> str:
     или двойной пробел - такое читается как сломанный шаблон и работает
     против нас ровно так же, как и пустое место.
     """
-    text = text.replace("-", "-").replace("-", "-")
+    text = text.replace("\u2014", "-").replace("\u2013", "-")
     text = re.sub(r"[ \t]{2,}", " ", text)
     # «: .» и «: ,» - переменная оказалась пустой
     text = re.sub(r"[:\-]\s*(?=[.,;!?])", "", text)
@@ -188,7 +188,7 @@ def check(body: str, with_link: bool = True) -> list[str]:
     words = len(re.findall(r"[А-Яа-яA-Za-z0-9]+", text))
     if words > WORD_LIMIT:
         problems.append(f"{words} слов, лимит {WORD_LIMIT}")
-    if "-" in body or "-" in body:
+    if "\u2014" in body or "\u2013" in body:
         problems.append("длинное тире")
     if text.count("?") > 1:
         problems.append("больше одного вопроса")

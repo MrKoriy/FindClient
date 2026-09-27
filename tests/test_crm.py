@@ -135,6 +135,24 @@ def test_check_catches_unknown_placeholder():
     assert any("неизвестные переменные" in p for p in problems)
 
 
+def test_check_does_not_flag_hyphenated_words():
+    """Дефис в «сайт-квиз» - это не длинное тире, замечание ложно."""
+    problems = tpl.check("Здравствуйте! Делаю сайт-квиз за три дня. Взглянете?")
+    assert "длинное тире" not in problems
+
+
+def test_check_flags_long_dashes():
+    for dash in ("\u2014", "\u2013"):
+        problems = tpl.check(f"Здравствуйте! Мы{dash} делаем сайты. Взглянете?")
+        assert "длинное тире" in problems, dash
+
+
+def test_cleanup_normalizes_long_dashes():
+    assert tpl.cleanup("мы \u2014 делаем сайты") == "мы - делаем сайты"
+    assert tpl.cleanup("мы \u2013 делаем сайты") == "мы - делаем сайты"
+    assert tpl.cleanup("сайт-квиз") == "сайт-квиз"
+
+
 def test_pick_variant_changes_greeting_deterministically():
     body = tpl.DEFAULT_TEMPLATES[0]["body"]
     variants = {tpl.pick_variant(body, seed) for seed in range(30)}
