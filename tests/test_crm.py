@@ -17,12 +17,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from crm import db as crm_db
 from crm import templates as tpl
 
-# Тесты, которые доходят до реальной отправки, требуют Telethon. Где его нет —
+# Тесты, которые доходят до реальной отправки, требуют Telethon. Где его нет -
 # они пропускаются, а не падают: иначе отсутствие зависимости выглядит как
 # поломка логики. Там, где Telethon стоит (прод), они действительно прогоняются.
 HAS_TELETHON = importlib.util.find_spec("telethon") is not None
 needs_telethon = pytest.mark.skipif(
-    not HAS_TELETHON, reason="telethon не установлен — проверка отправки пропущена"
+    not HAS_TELETHON, reason="telethon не установлен - проверка отправки пропущена"
 )
 
 
@@ -35,7 +35,7 @@ def crm_path(tmp_path):
 
 @pytest.fixture()
 def scraper_path(tmp_path):
-    """Мини-копия основной базы бота — только нужная таблица."""
+    """Мини-копия основной базы бота - только нужная таблица."""
     path = str(tmp_path / "scraper.db")
     conn = sqlite3.connect(path)
     conn.executescript("""
@@ -84,7 +84,7 @@ def test_facts_handles_missing_halves():
 
 
 def test_facts_hides_low_rating():
-    """Хвалить рейтинг 1,0 нельзя — это работает против нас."""
+    """Хвалить рейтинг 1,0 нельзя - это работает против нас."""
     assert tpl.facts_phrase({"rating": 1.0, "reviews": 2}) == "2 отзыва"
     assert tpl.facts_phrase({"rating": 3.9, "reviews": 10}) == "10 отзывов"
     assert tpl.facts_phrase({"rating": 4.0, "reviews": 10}) == "4,0 и 10 отзывов"
@@ -297,7 +297,7 @@ def test_settings_survive_reinit(crm_path):
 # ---------------------------------------------------------------- воркер
 
 class FakeClient:
-    """Заглушка: если воркер в холостом режиме попробует отправить — тест упадёт."""
+    """Заглушка: если воркер в холостом режиме попробует отправить - тест упадёт."""
 
     def __init__(self):
         self.sent = []
@@ -386,3 +386,212 @@ def test_sender_marks_failure_and_keeps_going(crm_path):
     message = crm_db.list_messages(crm_db=crm_path)[0]
     assert message["status"] == "failed"
     assert "получател" in message["error"]
+
+
+# ---------------------------------------------------------------- генератор офферов и Jev Judge
+
+def test_offer_strategies_list():
+    from crm import offer
+
+    strategies = offer.get_strategies()
+    assert len(strategies) >= 4
+    ids = {s["id"] for s in strategies}
+    assert {"lost_traffic", "social_only", "ready_concept", "conversion_quiz"} <= ids
+
+
+def test_generate_offer_all_strategies_score_well():
+    from crm import offer
+
+    sample = {
+        "name": "СтройМастер",
+        "rating": 4.8,
+        "reviews": 42,
+        "category": "ремонт квартир",
+        "city": "Москва",
+    }
+    for strat in offer.get_strategies():
+        res = offer.generate_offer(sample, strategy_id=strat["id"])
+        text = res["text"]
+        cls = res["classification"]
+        assert len(text) > 20
+        assert cls["score"] >= 80, f"Стратегия {strat['id']} набрала всего {cls['score']}: {cls['recommendations']}"
+        assert cls["verdict"] in ("excellent", "good")
+
+
+def test_classify_penalizes_price_and_long_dash():
+    from crm import offer
+
+    bad_text = (
+        "Здравствуйте! Предлагаем сайт за 45000 руб. со скидкой - сделаем быстро. "
+        "Интересно? Или перезвонить позже?"
+    )
+    res = offer.classify_offer(bad_text)
+    assert res["score"] < 70
+    assert any("цен" in r.lower() or "прайс" in r.lower() for r in res["recommendations"])
+    assert any("тире" in r.lower() for r in res["recommendations"])
+    assert any("вопрос" in r.lower() for r in res["recommendations"])
+    assert res["checks"]["no_em_dash"] is False
+    assert res["checks"]["no_price"] is False
+    assert res["checks"]["single_question"] is False
+
+
+def test_classify_penalizes_excess_words():
+    from crm import offer
+
+    long_text = "Здравствуйте! " + "слово " * 55 + "Есть смысл обсудить?"
+    res = offer.classify_offer(long_text)
+    assert any("слов" in r.lower() for r in res["recommendations"])
+    assert res["checks"]["under_word_limit"] is False
+
+
+def test_auto_improve_offer_fixes_flaws():
+    from crm import offer
+
+    flawed = "Здравствуйте! Сайт стоит 30000 руб - сделаем быстро. Показать? Или перезвонить?"
+    improved = offer.auto_improve_offer(flawed)
+    assert "-" not in improved
+    assert "30000" not in improved
+    assert improved.count("?") == 1
+    res = offer.classify_offer(improved)
+    assert res["checks"]["no_em_dash"] is True
+    assert res["checks"]["single_question"] is True
+
+
+def test_offer_api_endpoints(crm_path, scraper_path):
+    import asyncio
+    import base64
+    from aiohttp.test_utils import TestClient, TestServer
+    from crm import app as crm_app
+
+    crm_app.USER = "admin"
+    crm_app.PASSWORD = "secret"
+    crm_db.DEFAULT_CRM_DB = crm_path
+    crm_db.import_targets(scraper_path, crm_path)
+
+    async def _run():
+        app = crm_app.create_app()
+        auth = base64.b64encode(b"admin:secret").decode("utf-8")
+        headers = {"Authorization": f"Basic {auth}"}
+
+        async with TestClient(TestServer(app), headers=headers) as client:
+            # 1. Strategies list
+            r = await client.get("/api/offer/strategies")
+            assert r.status == 200
+            data = await r.json()
+            assert len(data["items"]) >= 4
+
+            # 2. Generate
+            target = crm_db.list_targets(crm_db=crm_path)[0]
+            r = await client.post("/api/offer/generate", json={
+                "target_id": target["id"],
+                "strategy_id": "lost_traffic",
+            })
+            assert r.status == 200
+            gen_data = await r.json()
+            assert "text" in gen_data
+            assert gen_data["classification"]["score"] >= 80
+
+            # 3. Classify
+            r = await client.post("/api/offer/classify", json={
+                "text": gen_data["text"],
+                "target_id": target["id"],
+            })
+            assert r.status == 200
+            cls_data = await r.json()
+            assert cls_data["score"] >= 80
+
+            # 4. Improve
+            r = await client.post("/api/offer/improve", json={
+                "text": "Здравствуйте! Сайт 50000 руб - сделаем быстро. Купите? Или созвонимся?",
+                "target_id": target["id"],
+            })
+            assert r.status == 200
+            imp_data = await r.json()
+            assert "\u2014" not in imp_data["text"]
+            assert imp_data["classification"]["checks"]["no_em_dash"] is True
+
+            # 5. Supported Models
+            r = await client.get("/api/models")
+            assert r.status == 200
+            models_data = await r.json()
+            model_ids = [m["id"] for m in models_data.get("items", [])]
+            assert "qwen3.8-flash" in model_ids
+            assert "deepseek-v4.1-flash" in model_ids
+
+    asyncio.run(_run())
+
+
+def test_bai_clean_human_output():
+    from crm import bai
+
+    raw_quoted = '«Приветствую! Мы разрабатываем сайты \u2014 быстро и качественно. Взглянете?»'
+    cleaned = bai.clean_human_output(raw_quoted)
+    assert "\u2014" not in cleaned
+    assert not cleaned.startswith('«')
+    assert not cleaned.endswith('»')
+    assert "сайты - быстро" in cleaned
+
+def test_magic_token_and_session_cookie():
+    from crm import auth
+
+    secret = "test-secret-key-12345"
+    uid = 1432816193
+
+    token = auth.generate_magic_token(uid, secret=secret)
+    assert token
+    assert auth.verify_magic_token(token, secret=secret) == uid
+
+    # Invalid token or wrong secret
+    assert auth.verify_magic_token(token, secret="wrong-secret") is None
+    assert auth.verify_magic_token("corrupted.token", secret=secret) is None
+
+    # Session cookie
+    cookie = auth.create_session_cookie(uid, secret=secret)
+    assert cookie
+    assert auth.verify_session_cookie(cookie, secret=secret) == uid
+    assert auth.verify_session_cookie(cookie, secret="wrong-secret") is None
+
+
+def test_crm_auth_flow(crm_path):
+    import asyncio
+    from aiohttp.test_utils import TestClient, TestServer
+    from crm import app as crm_app
+    from crm import auth
+
+    crm_app.USER = "admin"
+    crm_app.PASSWORD = "secret"
+    crm_db.DEFAULT_CRM_DB = crm_path
+
+    async def _run():
+        app = crm_app.create_app()
+        async with TestClient(TestServer(app)) as client:
+            # 1. Without auth -> 401
+            r = await client.get("/")
+            assert r.status == 401
+
+            # 2. Via /auth with magic token -> 302 Found and cookie set
+            token = auth.generate_magic_token(1432816193)
+            r = await client.get(f"/auth?token={token}", allow_redirects=False)
+            assert r.status == 302
+            assert "crm_session" in client.session.cookie_jar.filter_cookies(client.make_url("/"))
+
+            # 3. Subsequent request with session cookie -> 200 OK
+            r = await client.get("/api/summary")
+            assert r.status == 200
+            data = await r.json()
+            assert "targets" in data
+
+            # 4. Direct request with ?token=... param -> 200 OK
+            client.session.cookie_jar.clear()
+            token2 = auth.generate_magic_token(1432816193)
+            r = await client.get(f"/?token={token2}")
+            assert r.status == 200
+
+            # 5. Logout
+            r = await client.get("/auth/logout", allow_redirects=False)
+            assert r.status == 302
+
+    asyncio.run(_run())
+
+
+

@@ -29,6 +29,7 @@ COMMANDS = [
     BotCommand(command="niches", description="Денежные ниши"),
     BotCommand(command="tg", description="Лиды из Telegram"),
     BotCommand(command="orders", description="Автопоиск заказов"),
+    BotCommand(command="crm", description="Вход в CRM (в один клик)"),
     BotCommand(command="history", description="История сборов"),
     BotCommand(command="stats", description="Статистика"),
     BotCommand(command="cancel", description="Отменить шаг"),
@@ -38,7 +39,7 @@ COMMANDS = [
 async def main() -> None:
     settings = Settings.from_env()
     if not settings.OWNER_IDS:
-        log.warning("OWNER_IDS is empty — anyone who finds the bot can use it")
+        log.warning("OWNER_IDS is empty - anyone who finds the bot can use it")
 
     bot = Bot(token=settings.BOT_TOKEN)
     dp = Dispatcher()

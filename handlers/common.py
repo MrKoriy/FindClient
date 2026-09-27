@@ -50,6 +50,7 @@ MAIN_MENU = kb([
     [("🔎 Компании с карт (2GIS + Яндекс)", "menu:scrape")],
     [("💰 Денежные ниши", "menu:niches"), ("👷 Telegram-лиды", "menu:tg")],
     [("💼 Заказы с бирж", "menu:orders")],
+    [("Панель CRM (вход в один клик)", "menu:crm")],
     [("🕘 История", "menu:history"), ("📈 Статистика", "menu:stats")],
 ])
 
@@ -71,7 +72,7 @@ class AccessMiddleware(BaseMiddleware):
         user = data.get("event_from_user")
         if not self.owner_ids or (user and user.id in self.owner_ids):
             return await handler(event, data)
-        text = f"⛔ Доступ закрыт. Ваш Telegram ID: {user.id if user else '?'} — добавьте его в OWNER_IDS."
+        text = f"⛔ Доступ закрыт. Ваш Telegram ID: {user.id if user else '?'} - добавьте его в OWNER_IDS."
         if isinstance(event, Message):
             await event.answer(text)
         elif isinstance(event, CallbackQuery):

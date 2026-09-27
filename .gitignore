@@ -12,3 +12,4 @@ __pycache__/
 venv/
 crm.env
 twogis_creds.json
+.workbuddy-ai/

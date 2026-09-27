@@ -6,7 +6,7 @@
 #   cd /opt/2gi_scraper && bash deploy/install_crm.sh
 #
 # Пароль: если crm.env уже есть, переиспользуется. Иначе берётся из CRM_PASS,
-# а если её нет — генерируется и печатается в конце.
+# а если её нет - генерируется и печатается в конце.
 
 set -euo pipefail
 
@@ -28,7 +28,7 @@ cd "$PROJECT"
 
 say "1/7 Проверяю окружение"
 [[ -x "$VENV/bin/python" ]] || die "нет $VENV/bin/python"
-[[ -f "$PROJECT/crm/app.py" ]] || die "нет crm/app.py — сначала git pull"
+[[ -f "$PROJECT/crm/app.py" ]] || die "нет crm/app.py - сначала git pull"
 [[ -f "$CERT_DIR/fullchain.pem" ]] || die "нет сертификата для $HOSTNAME_"
 "$VENV/bin/python" -c "import aiohttp, telethon" \
     || die "в venv нет aiohttp или telethon: $VENV/bin/pip install -r requirements.txt"
@@ -37,7 +37,7 @@ say "2/7 Проверяю, что имя $HOSTNAME_ на порту $PORT сво
 # На 443 то же имя занято shift-plus.conf, и это не пустой конфиг: там
 # /vless-xhttp -> Xray (127.0.0.1:10085) и / -> 127.0.0.1:8080. Первая версия
 # панели встала туда же, nginx выбрал её первой по алфавиту файлов, и чужой
-# VLESS-эндпоинт начал отдавать 401. Порт уникальный — конфликт невозможен,
+# VLESS-эндпоинт начал отдавать 401. Порт уникальный - конфликт невозможен,
 # но проверяем и падаем, а не полагаемся на это.
 conflicts=$(grep -rlE "listen[^;]*[^0-9]$PORT\b" /etc/nginx/sites-enabled/ 2>/dev/null \
             | grep -v "$SITE" || true)
@@ -88,7 +88,7 @@ ln -sf "/etc/nginx/sites-available/$SITE.conf" "/etc/nginx/sites-enabled/$SITE.c
 if ! nginx -t; then
     rm -f "/etc/nginx/sites-enabled/$SITE.conf"
     systemctl reload nginx || true
-    die "конфиг nginx не прошёл проверку — откатил, чужие сайты не тронуты"
+    die "конфиг nginx не прошёл проверку - откатил, чужие сайты не тронуты"
 fi
 systemctl reload nginx
 ufw allow "$PORT/tcp" >/dev/null 2>&1 || true
@@ -117,7 +117,7 @@ sleep 3
 URL="https://$HOSTNAME_:$PORT/"
 code=$(curl -sk -o /dev/null -w '%{http_code}' "$URL" -u "$CRM_USER:$CRM_PASS" || true)
 echo "панель отвечает: HTTP $code"
-[[ "$code" == "200" ]] || echo "панель не ответила 200 — смотри journalctl -u findclient-crm -n 50" >&2
+[[ "$code" == "200" ]] || echo "панель не ответила 200 - смотри journalctl -u findclient-crm -n 50" >&2
 
 # Чужой VLESS-эндпоинт должен быть нетронут. 401 здесь означал бы, что мы
 # его перехватили: это уже случалось, поэтому проверка встроена.

@@ -4,11 +4,11 @@
 
 1. Бот держит свою базу и делает автомиграции при старте. Если CRM начнёт
    писать в ту же базу, любая ошибка в схеме ломает бота, а не панель.
-2. CRM нужна для истории «кому что отправлено» — это данные, которые дороже
+2. CRM нужна для истории «кому что отправлено» - это данные, которые дороже
    любой выгрузки, и их лучше изолировать.
 
 Цели импортируются из таблицы `organizations` основной базы: это компании с
-карт. Для рассылки годятся те, у кого нет сайта — им и продаём сайт.
+карт. Для рассылки годятся те, у кого нет сайта - им и продаём сайт.
 """
 
 from __future__ import annotations
@@ -123,7 +123,7 @@ CREATE TABLE IF NOT EXISTS events (
 """
 
 # Настройки по умолчанию. Лимиты взяты не с потолка: свежий аккаунт
-# выдерживает 10–15 холодных сообщений в день, прогретый — 30–40.
+# выдерживает 10-15 холодных сообщений в день, прогретый - 30-40.
 # Аккаунт Леонида уже помечен, поэтому стартуем с нижней границы.
 DEFAULT_SETTINGS = {
     "daily_cap": "10",            # сообщений в день
@@ -137,6 +137,13 @@ DEFAULT_SETTINGS = {
     "dry_run": "1",               # по умолчанию только показывать, не отправлять
     "first_message_no_link": "1", # ссылка не в первом сообщении
     "timezone_offset": "3",       # UTC+3
+    "typesafe_api_key": "",       # ключ TypeSafe Jev API
+    "typesafe_model": "jev-latest", # модель классификатора
+    "bai_api_key": "",            # ключ B.AI API
+    "bai_base_url": "https://api.b.ai/v1", # адрес шлюза B.AI
+    "bai_model": "qwen3.8-flash", # модель генератора (Qwen 3.8 Flash / DeepSeek)
+    "enable_humanizer": "1",      # включен скилл Humanizer
+    "enable_russian_outreach": "1", # включен скилл Russian Outreach
 }
 
 
@@ -188,7 +195,7 @@ def import_targets(scraper_db: str | None = None, crm_db: str | None = None) -> 
     """Подтягивает компании с карт в цели.
 
     Берём только тех, у кого **нет сайта**: им и продаём сайт. Компании с
-    сайтом попадают в базу как `skip` — чтобы не выпадали из виду совсем,
+    сайтом попадают в базу как `skip` - чтобы не выпадали из виду совсем,
     но и в очередь не лезли.
     """
     scraper_db = scraper_db or DEFAULT_SCRAPER_DB
@@ -220,6 +227,26 @@ def import_targets(scraper_db: str | None = None, crm_db: str | None = None) -> 
                     r["city"] or "", r["category"] or "", r["rating"] or 0,
                     r["reviews"] or 0, r["source"] or "", status,
                 ),
+            )
+            added += cur.rowcount
+    return added
+
+
+def seed_demo_targets(crm_db: str | None = None) -> int:
+    """Засевает реалистичные цели без сайта для тестирования CRM и генератора офферов."""
+    demos = [
+        ("demo_1", "Клиника «ДентаЛайн»", "+79991112233", "Москва, ул. Тверская, 12", "Москва", "стоматология", 4.9, 84, "dentaline_msk"),
+        ("demo_2", "Юридическая группа «Правовед»", "+78122223344", "Санкт-Петербург, Невский пр., 45", "Санкт-Петербург", "юридические услуги", 4.8, 62, "pravoved_spb"),
+        ("demo_3", "Автосервис «Моторс Про»", "+74953334455", "Москва, Варшавское ш., 88", "Москва", "авторемонт", 4.7, 115, "motorspro_ru"),
+        ("demo_4", "Студия красоты «Элеганс»", "+79164445566", "Казань, ул. Баумана, 21", "Казань", "салон красоты", 5.0, 93, "elegance_beauty"),
+        ("demo_5", "Ремонт квартир «СтройКом»", "+78125556677", "Санкт-Петербург, пр. Просвещения, 30", "Санкт-Петербург", "ремонт квартир", 4.6, 38, "stroykom_remont"),
+    ]
+    added = 0
+    with connect(crm_db) as conn:
+        for org_key, name, phone, addr, city, cat, rating, reviews, username in demos:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO targets (org_key, name, phone, address, city, category, rating, reviews, username, status) VALUES (?,?,?,?,?,?,?,?,?, 'new')",
+                (org_key, name, phone, addr, city, cat, rating, reviews, username)
             )
             added += cur.rowcount
     return added
