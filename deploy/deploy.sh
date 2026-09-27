@@ -9,8 +9,7 @@
 # It never touches .env or scraper.db if they already exist.
 set -euo pipefail
 
-APP_DIR=${APP_DIR:-/opt/findclient}
-APP_USER=${APP_USER:-findclient}
+APP_DIR=${APP_DIR:-/opt/2gi_scraper}
 REPO=${REPO:-https://github.com/MrKoriy/FindClient.git}
 BRANCH=${BRANCH:-main}
 START=1
@@ -38,15 +37,8 @@ import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
 PY
 echo "python: $($PY -V)"
 
-log "Service user"
-if ! id "$APP_USER" >/dev/null 2>&1; then
-  useradd --system --create-home --shell /usr/sbin/nologin "$APP_USER"
-  echo "created user $APP_USER"
-else
-  echo "user $APP_USER exists"
-fi
-
 log "Code"
+# Сервис работает от root (как и CRM-юниты), выделенный пользователь не нужен.
 mkdir -p "$APP_DIR"
 if [ -d "$APP_DIR/.git" ]; then
   git -C "$APP_DIR" remote set-url origin "$REPO"
@@ -60,7 +52,6 @@ else
   git clone --branch "$BRANCH" "$REPO" "$APP_DIR"
   echo "code: cloned $(git -C "$APP_DIR" rev-parse --short HEAD)"
 fi
-chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 
 log "Python environment"
 [ -x "$APP_DIR/.venv/bin/python" ] || "$PY" -m venv "$APP_DIR/.venv"
@@ -69,13 +60,12 @@ log "Python environment"
 echo "installed: $("$APP_DIR/.venv/bin/pip" list --format=freeze | wc -l) packages"
 
 log "systemd unit"
-install -m 0644 "$APP_DIR/deploy/findclient.service" /etc/systemd/system/findclient.service
+install -m 0644 "$APP_DIR/deploy/2gi-scraper.service" /etc/systemd/system/2gi-scraper.service
 systemctl daemon-reload
-systemctl enable findclient >/dev/null
+systemctl enable 2gi-scraper >/dev/null
 
 if [ ! -f "$APP_DIR/.env" ]; then
   cp "$APP_DIR/.env.example" "$APP_DIR/.env"
-  chown "$APP_USER:$APP_USER" "$APP_DIR/.env"
   chmod 600 "$APP_DIR/.env"
   log "STOP: fill in $APP_DIR/.env"
   cat <<EOF
@@ -85,13 +75,12 @@ Created $APP_DIR/.env from .env.example. Edit it:
 
 Then:
 
-    systemctl start findclient
-    journalctl -u findclient -f
+    systemctl start 2gi-scraper
+    journalctl -u 2gi-scraper -f
 
 EOF
   exit 0
 fi
-chown "$APP_USER:$APP_USER" "$APP_DIR/.env"
 chmod 600 "$APP_DIR/.env"
 
 if grep -q 'your_telegram_bot_token_here' "$APP_DIR/.env"; then
@@ -102,14 +91,14 @@ if [ "$START" -eq 1 ]; then
   log "Restart"
   # Stop anything else already polling this token (old deployment), or Telegram
   # returns 409 Conflict and neither copy works.
-  systemctl stop findclient 2>/dev/null || true
-  systemctl start findclient
+  systemctl stop 2gi-scraper 2>/dev/null || true
+  systemctl start 2gi-scraper
   sleep 3
-  systemctl --no-pager --lines=25 status findclient || true
+  systemctl --no-pager --lines=25 status 2gi-scraper || true
   log "Log"
-  journalctl -u findclient -n 30 --no-pager || true
+  journalctl -u 2gi-scraper -n 30 --no-pager || true
 else
   echo "--no-start: service installed but not started"
 fi
 
-log "Done. Tail logs with: journalctl -u findclient -f"
+log "Done. Tail logs with: journalctl -u 2gi-scraper -f"

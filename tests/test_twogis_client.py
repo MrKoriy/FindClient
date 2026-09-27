@@ -368,3 +368,38 @@ class TestSearch:
 
         orgs = await client.search("test", count=3)
         assert len(orgs) == 3
+
+    @pytest.mark.asyncio
+    async def test_search_applies_skip_ids_and_without_site(self):
+        """Фильтры skip_ids/only_without_site работают внутри клиента, а не снаружи."""
+        client, session = _make_client(request_delay=0.0)
+
+        profiles = {
+            "1": {"name": "With site", "address_name": "", "rating": 0},
+            "2": {"name": "No site", "address_name": "", "rating": 0},
+            "3": {"name": "Skipped", "address_name": "", "rating": 0},
+        }
+        search_resp = AsyncMock()
+        search_resp.status = 200
+        search_resp.text = AsyncMock(return_value=_build_search_html(profiles))
+
+        site = AsyncMock()
+        site.status = 200
+        site.text = AsyncMock(return_value=_build_firm_html(
+            [{"contacts": [{"type": "website", "value": "https://foo.ru"}]}]
+        ))
+        phone = AsyncMock()
+        phone.status = 200
+        phone.text = AsyncMock(return_value=_build_firm_html(
+            [{"contacts": [{"type": "phone", "value": "+7"}]}]
+        ))
+
+        session.get = MagicMock(side_effect=[
+            _async_context(search_resp),
+            _async_context(site),
+            _async_context(phone),
+            _async_context(phone),
+        ])
+
+        orgs = await client.search("test", count=3, only_without_site=True, skip_ids={"3"})
+        assert [o.name for o in orgs] == ["No site"]

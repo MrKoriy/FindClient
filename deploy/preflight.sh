@@ -2,7 +2,7 @@
 # Preflight for FindClient: what the server can actually reach and which Python it has.
 # Run this BEFORE installing anything. Sources are scraped from the server's IP,
 # so a blocked host here means a dead section of the bot later.
-set -uo pipefail
+set -euo pipefail
 
 say() { printf '\n=== %s ===\n' "$1"; }
 
@@ -25,7 +25,7 @@ PY
 say "existing findclient / bot processes"
 ps -eo pid,etime,cmd 2>/dev/null | grep -Ei 'bot\.py|findclient' | grep -v grep || echo "none"
 systemctl list-units --type=service --all 2>/dev/null | grep -Ei 'findclient|2gis|scraper' || echo "no matching systemd units"
-ls -d /opt/findclient /root/findclient /home/*/findclient /srv/findclient 2>/dev/null || echo "no /opt|/root|/home|/srv findclient dir"
+ls -d /opt/2gi_scraper /opt/findclient /root/findclient 2>/dev/null || echo "no known install dir"
 
 say "outbound reachability (5s each, HTTP status / 000 = blocked)"
 for url in \

@@ -1,14 +1,17 @@
-"""Reuse the server's existing authorized Telethon session for FindClient.
+"""Reuse an existing authorized Telethon session for FindClient.
 
-FindClient expects TG_SESSION as a StringSession, while the established session
-on this server is a SQLite file used by many other scripts. We connect with the
-file, verify it is still authorized, export a StringSession and write it into
-/opt/2gi_scraper/.env. The session string never leaves the server.
+FindClient expects TG_SESSION as a StringSession, while an established
+session may live as a SQLite file used by other scripts. We connect with
+the file, verify it is still authorized, export a StringSession and write
+it into the project's .env.
+
+    python scripts/reuse_tg_session.py [путь/к/сессии] [.env]
 """
 
 import asyncio
 import os
 import re
+import sys
 
 from telethon import TelegramClient
 from telethon.sessions import StringSession
@@ -17,8 +20,9 @@ API_ID = int(os.environ.get("TG_API_ID", "0"))
 API_HASH = os.environ.get("TG_API_HASH", "")
 if not API_ID or not API_HASH:
     raise SystemExit("нужны TG_API_ID и TG_API_HASH в окружении")
-SRC = "/root/.hermes/telethon_vibecoders"
-ENV = "/opt/2gi_scraper/.env"
+
+SRC = sys.argv[1] if len(sys.argv) > 1 else "/root/.hermes/telethon_vibecoders"
+ENV = sys.argv[2] if len(sys.argv) > 2 else ".env"
 
 
 def set_key(text: str, key: str, value: str) -> str:
@@ -59,4 +63,5 @@ async def main() -> None:
     print(f"RESULT=OK session_len={len(string)} env={ENV}")
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

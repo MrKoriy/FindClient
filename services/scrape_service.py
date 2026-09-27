@@ -163,10 +163,10 @@ class ScrapeService:
             async def on_firm(done: int, total: int) -> None:
                 await progress(f"2GIS (веб) «{query}»: карточки {done}/{total}")
 
-            orgs = await client.search(query if region_id else f"{query} {req.city}", need * 2, on_progress=on_firm)
-            orgs = [o for o in orgs if o.id not in skip]
-            if req.only_without_site:
-                orgs = [o for o in orgs if not o.has_website]
+            orgs = await client.search(
+                query if region_id else f"{query} {req.city}", need * 2,
+                on_progress=on_firm, only_without_site=req.only_without_site, skip_ids=skip,
+            )
             return orgs[:need]
         finally:
             # The API may have opened its own session for the DDoS-Guard edge.

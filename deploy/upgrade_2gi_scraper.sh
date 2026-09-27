@@ -73,34 +73,7 @@ chmod 600 "$APP_DIR/.env"
 echo "wrote $APP_DIR/.env: $(grep -c . "$APP_DIR/.env") lines"
 
 log "systemd unit"
-cat > "/etc/systemd/system/$SERVICE" <<UNIT
-[Unit]
-Description=FindClient Telegram bot (maps + Telegram leads + freelance orders)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-WorkingDirectory=$APP_DIR
-EnvironmentFile=$APP_DIR/.env
-Environment=PYTHONUNBUFFERED=1
-Environment=PYTHONDONTWRITEBYTECODE=1
-ExecStart=$APP_DIR/venv/bin/python3 bot.py
-Restart=always
-RestartSec=5
-TimeoutStopSec=20
-KillSignal=SIGINT
-NoNewPrivileges=yes
-PrivateTmp=yes
-ProtectSystem=full
-ProtectHome=yes
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=2gi-scraper
-
-[Install]
-WantedBy=multi-user.target
-UNIT
+install -m 0644 "$APP_DIR/deploy/2gi-scraper.service" /etc/systemd/system/$SERVICE
 systemctl daemon-reload
 systemctl enable "$SERVICE" >/dev/null
 

@@ -14,14 +14,9 @@ from urllib.parse import quote
 
 import aiohttp
 
-from api.common import USER_AGENTS, clean_social, clean_url, is_social_url, lead_score
+from api.common import USER_AGENTS, lead_score
+from api.contacts import join_contacts
 from models.organization import Organization
-
-# Social network / messenger contact types recognized by the parser.
-_SOCIAL_TYPES = frozenset(
-    ("vk", "vkontakte", "instagram", "facebook", "twitter", "youtube", "skype", "icq",
-     "telegram", "whatsapp", "viber", "odnoklassniki", "max")
-)
 
 _USER_AGENTS = USER_AGENTS
 
@@ -77,15 +72,20 @@ class TwoGISClient:
         count: int,
         start_page: int = 1,
         on_progress: Callable[[int, int], Awaitable[None]] | None = None,
+        only_without_site: bool = False,
+        skip_ids: set[str] | None = None,
     ) -> list[Organization]:
         """Search for organizations and return up to *count* results.
 
         Args:
             start_page: Page number to start from (skip earlier pages).
             on_progress: Optional async callback(enriched_so_far, total).
+            only_without_site: Drop companies that already have a website.
+            skip_ids: Organization ids to skip (already collected/known).
         """
         organizations: list[Organization] = []
         page = start_page
+        skip_ids = skip_ids or set()
 
         while len(organizations) < count:
             orgs_from_page = await self._fetch_search_page(query, page)
@@ -124,7 +124,11 @@ class TwoGISClient:
             if on_progress and (i + 1) % 5 == 0:
                 await on_progress(i + 1, len(organizations))
 
-        return organizations
+        if skip_ids:
+            organizations = [o for o in organizations if o.id not in skip_ids]
+        if only_without_site:
+            organizations = [o for o in organizations if not o.has_website]
+        return organizations[:count]
 
     def _jittered_delay(self) -> float:
         """Return request_delay with +/- 50% random jitter."""
@@ -218,38 +222,7 @@ class TwoGISClient:
         Returns a dict with keys ``phone``, ``email``, ``website``,
         ``socials`` -- each a comma-joined string or empty string.
         """
-        phones: list[str] = []
-        emails: list[str] = []
-        websites: list[str] = []
-        socials: list[str] = []
-
-        for group in contact_groups:
-            for contact in group.get("contacts", []):
-                ctype = contact.get("type", "")
-                value = contact.get("value", "")
-
-                if ctype == "phone":
-                    phones.append(value)
-                elif ctype == "email":
-                    emails.append(value)
-                elif ctype == "website":
-                    # Prefer alias, fall back to value, strip 2GIS redirect
-                    url = contact.get("alias") or value
-                    if "link.2gis.ru" in url and "?" in url:
-                        url = url.split("?", 1)[1]
-                    if is_social_url(url):
-                        socials.append(clean_social(url))
-                    else:
-                        websites.append(clean_url(url))
-                elif ctype in _SOCIAL_TYPES:
-                    socials.append(clean_social(contact.get("url", value)))
-
-        return {
-            "phone": ", ".join(phones),
-            "email": ", ".join(emails),
-            "website": ", ".join(websites),
-            "socials": ", ".join(socials),
-        }
+        return join_contacts(contact_groups)
 
 
 # ------------------------------------------------------------------

@@ -26,7 +26,8 @@ from typing import Any
 
 import aiohttp
 
-from api.common import USER_AGENTS, clean_social, clean_url, is_social_url, lead_score
+from api.common import USER_AGENTS, lead_score
+from api.contacts import split_contacts
 from models.organization import Organization
 
 log = logging.getLogger(__name__)
@@ -59,12 +60,6 @@ _RETRY_AFTER = 900.0
 # and the edge — which is reachable — gets the full budget.
 _DIRECT_TIMEOUT = aiohttp.ClientTimeout(total=60, connect=6)
 _EDGE_TIMEOUT = aiohttp.ClientTimeout(total=60)
-_MESSENGER_TYPES = frozenset((
-    "vkontakte", "vk", "instagram", "facebook", "twitter", "youtube", "telegram",
-    "whatsapp", "viber", "odnoklassniki", "ok", "max", "skype", "icq",
-))
-
-
 class TwoGISError(RuntimeError):
     pass
 
@@ -405,27 +400,7 @@ def parse_item(item: dict[str, Any], city: str = "", slug: str = "") -> Organiza
     firm_id = raw_id.split("_", 1)[0]
     name = (item.get("name_ex") or {}).get("primary") or item.get("name", "")
     ext = (item.get("name_ex") or {}).get("extension", "")
-
-    phones, emails, sites, socials = [], [], [], []
-    for group in item.get("contact_groups") or []:
-        for c in group.get("contacts") or []:
-            ctype, value = c.get("type", ""), c.get("value", "")
-            if ctype == "phone" and value not in phones:
-                phones.append(value)
-            elif ctype == "email" and value not in emails:
-                emails.append(value)
-            elif ctype == "website":
-                url = c.get("url") or value.split("?", 1)[-1]
-                if is_social_url(url):
-                    url, bucket = clean_social(url), socials
-                else:
-                    url, bucket = clean_url(url), sites
-                if url not in bucket:
-                    bucket.append(url)
-            elif ctype in _MESSENGER_TYPES:
-                link = clean_social(c.get("url") or value)
-                if link and link not in socials:
-                    socials.append(link)
+    contacts = split_contacts(item.get("contact_groups"))
 
     reviews = item.get("reviews") or {}
     org_info = item.get("org") or {}
@@ -433,17 +408,17 @@ def parse_item(item: dict[str, Any], city: str = "", slug: str = "") -> Organiza
     rating = float(reviews.get("general_rating") or 0)
     review_count = int(reviews.get("general_review_count") or 0)
     branches = int(org_info.get("branch_count") or 0)
-    phone = ", ".join(phones)
+    phone = ", ".join(contacts["phone"])
 
     org = Organization(
         id=firm_id,
         name=f"{name}, {ext}" if ext and ext.lower() not in name.lower() else name,
         phone=phone,
-        email=", ".join(emails),
-        website=", ".join(sites),
+        email=", ".join(contacts["email"]),
+        website=", ".join(contacts["website"]),
         address=item.get("address_name", ""),
         rating=rating,
-        socials=", ".join(socials),
+        socials=", ".join(contacts["socials"]),
         source="2gis",
         city=city,
         category=", ".join(rubrics),

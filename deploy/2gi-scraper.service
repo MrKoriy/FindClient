@@ -1,21 +1,19 @@
 [Unit]
-Description=FindClient Telegram bot (map + Telegram lead sourcing)
+Description=FindClient Telegram bot (maps + Telegram leads + freelance orders)
 Documentation=https://github.com/MrKoriy/FindClient
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=findclient
-Group=findclient
-WorkingDirectory=/opt/findclient
+WorkingDirectory=/opt/2gi_scraper
 
 # .env lives next to the code and is the single source of configuration.
-EnvironmentFile=/opt/findclient/.env
+EnvironmentFile=/opt/2gi_scraper/.env
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
 
-ExecStart=/opt/findclient/.venv/bin/python /opt/findclient/bot.py
+ExecStart=/opt/2gi_scraper/venv/bin/python3 bot.py
 
 # The bot polls Telegram with getUpdates: exactly ONE instance may run,
 # otherwise Telegram answers 409 Conflict and both copies thrash.
@@ -24,16 +22,15 @@ RestartSec=5
 TimeoutStopSec=20
 KillSignal=SIGINT
 
-# Modest hardening; the bot only needs to write its SQLite DB in WorkingDirectory.
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=full
 ProtectHome=yes
-ReadWritePaths=/opt/findclient
+ReadWritePaths=/opt/2gi_scraper
 
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=findclient
+SyslogIdentifier=2gi-scraper
 
 [Install]
 WantedBy=multi-user.target

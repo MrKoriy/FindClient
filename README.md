@@ -63,4 +63,27 @@ pytest -q        # ~1 с, без сети: внешние API замоканы (
 ruff check .     # линтер (конфиг в pyproject.toml)
 ```
 
-Структура: `api/` — клиенты источников, `services/` — бизнес-логика (поиск, заказы, Telegram, экспорт), `handlers/` — интерфейс бота, `data/niches.py` — каталог ниш, `db/` — SQLite (схема мигрирует автоматически).
+Структура: `api/` — клиенты источников (контакты 2GIS — общий модуль `api/contacts.py`), `services/` — бизнес-логика (поиск, заказы, Telegram, экспорт), `handlers/` — интерфейс бота, `data/niches.py` — каталог ниш, `db/` — SQLite (схема мигрирует автоматически).
+
+## CRM рассылки
+
+Отдельное приложение в `crm/` — панель учёта клиентов, генератор офферов
+(AI + правила) и воркер отправки с лимитами. Своя база `crm.db`, свои
+systemd-юниты, в бот интегрирована одной кнопкой `/crm`. Подробности:
+[crm/README.md](crm/README.md).
+
+```bash
+venv/bin/python -m crm.app      # панель (порт CRM_PORT, по умолчанию 8787)
+venv/bin/python -m crm.sender   # воркер отправки
+```
+
+## Развёртывание
+
+Всё живёт в `/opt/2gi_scraper`, venv — `venv`, сервис бота — `2gi-scraper.service`.
+
+```bash
+sudo bash deploy/deploy.sh               # установка с нуля (клон + venv + systemd)
+sudo bash deploy/upgrade_2gi_scraper.sh  # апгрейд существующей установки с бэкапом
+sudo bash deploy/preflight.sh            # проверка доступности источников с сервера
+cd /opt/2gi_scraper && bash deploy/install_crm.sh   # CRM-панель и воркер
+```
