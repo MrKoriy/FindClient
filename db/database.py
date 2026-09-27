@@ -88,22 +88,31 @@ class Database:
         self.path = path
         self._db: aiosqlite.Connection | None = None
 
+    @property
+    def _conn(self) -> aiosqlite.Connection:
+        """Гард вместо assert: под `python -O` assert испаряется, и «не
+        подключено» превращается в голый AttributeError вместо понятной ошибки."""
+        if self._db is None:
+            raise RuntimeError("база не подключена: сначала await connect()")
+        return self._db
+
     async def connect(self) -> None:
-        self._db = await aiosqlite.connect(self.path)
-        await self._db.execute("PRAGMA journal_mode=WAL")
-        await self._db.executescript(_SCHEMA)
+        db = await aiosqlite.connect(self.path)
+        await db.execute("PRAGMA journal_mode=WAL")
+        await db.executescript(_SCHEMA)
+        self._db = db
         await self._migrate()
-        await self._db.commit()
+        await self._conn.commit()
 
     async def _migrate(self) -> None:
-        assert self._db
+        db = self._conn
         for table, columns in _MIGRATIONS.items():
-            cur = await self._db.execute(f"PRAGMA table_info({table})")
+            cur = await db.execute(f"PRAGMA table_info({table})")
             existing = {row[1] for row in await cur.fetchall()}
             for name, ddl in columns:
                 if name not in existing:
-                    await self._db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
-        await self._db.execute(
+                    await db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+        await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_session_niche_city ON scrape_sessions(niche, city)"
         )
 
@@ -118,7 +127,6 @@ class Database:
 
     async def get_known_org_ids(self, niche: str, city: str | None = None) -> set[str]:
         """Return org IDs previously scraped for this niche (optionally in a city)."""
-        assert self._db
         sql = """
             SELECT DISTINCT o.org_id
             FROM organizations o
@@ -129,12 +137,11 @@ class Database:
         if city is not None:
             sql += " AND s.city = ?"
             params = (niche, city)
-        cursor = await self._db.execute(sql, params)
+        cursor = await self._conn.execute(sql, params)
         return {row[0] for row in await cursor.fetchall()}
 
     async def get_known_phone_keys(self, niche: str, city: str | None = None) -> set[str]:
         """Normalised phones already collected — catches the same company from another source."""
-        assert self._db
         sql = """
             SELECT DISTINCT o.phone FROM organizations o
             JOIN scrape_sessions s ON o.session_id = s.id
@@ -144,7 +151,7 @@ class Database:
         if city is not None:
             sql += " AND s.city = ?"
             params = (niche, city)
-        cur = await self._db.execute(sql, params)
+        cur = await self._conn.execute(sql, params)
         keys = set()
         for (phone,) in await cur.fetchall():
             digits = "".join(ch for ch in phone.split(",")[0] if ch.isdigit())
@@ -161,8 +168,7 @@ class Database:
         filters: str = "",
     ) -> int:
         """Save a scrape session and its organizations. Returns session ID."""
-        assert self._db
-        cursor = await self._db.execute(
+        cursor = await self._conn.execute(
             "INSERT INTO scrape_sessions (niche, count, city, sources, filters) VALUES (?, ?, ?, ?, ?)",
             (niche, len(organizations), city, sources, filters),
         )
@@ -171,22 +177,22 @@ class Database:
 
         cols = ", ".join(_ORG_FIELDS)
         marks = ", ".join("?" for _ in _ORG_FIELDS)
-        for org in organizations:
-            values = [org.get(f, _ORG_DEFAULTS.get(f, "")) for f in _ORG_FIELDS]
-            await self._db.execute(
-                f"INSERT OR IGNORE INTO organizations (org_id, session_id, {cols}) "
-                f"VALUES (?, ?, {marks})",
-                (org["id"], session_id, *values),
-            )
+        await self._conn.executemany(
+            f"INSERT OR IGNORE INTO organizations (org_id, session_id, {cols}) "
+            f"VALUES (?, ?, {marks})",
+            [
+                (org["id"], session_id, *[org.get(f, _ORG_DEFAULTS.get(f, "")) for f in _ORG_FIELDS])
+                for org in organizations
+            ],
+        )
 
-        await self._db.commit()
+        await self._conn.commit()
         return session_id
 
     async def get_session_orgs(self, session_id: int) -> list[dict]:
         """Return organizations of a past session (for re-download)."""
-        assert self._db
         cols = ", ".join(_ORG_FIELDS)
-        cur = await self._db.execute(
+        cur = await self._conn.execute(
             f"SELECT org_id, {cols} FROM organizations WHERE session_id = ?", (session_id,)
         )
         rows = await cur.fetchall()
@@ -194,8 +200,7 @@ class Database:
 
     async def get_history(self, limit: int = 20) -> list[dict]:
         """Return recent scrape sessions."""
-        assert self._db
-        cursor = await self._db.execute(
+        cursor = await self._conn.execute(
             """
             SELECT id, niche, count, created_at, city, sources
             FROM scrape_sessions
@@ -212,13 +217,12 @@ class Database:
 
     async def get_stats(self) -> dict:
         """Return overall collection statistics."""
-        assert self._db
 
         async def scalar(sql: str) -> int:
-            cur = await self._db.execute(sql)
+            cur = await self._conn.execute(sql)
             return (await cur.fetchone())[0]
 
-        top = await self._db.execute(
+        top = await self._conn.execute(
             """
             SELECT s.niche, COUNT(DISTINCT o.org_id) as cnt
             FROM organizations o
@@ -257,17 +261,15 @@ class Database:
 
     async def filter_new_order_uids(self, uids: list[str]) -> set[str]:
         """Return the subset of uids that have not been seen yet."""
-        assert self._db
         if not uids:
             return set()
         marks = ",".join("?" for _ in uids)
-        cur = await self._db.execute(f"SELECT uid FROM seen_orders WHERE uid IN ({marks})", uids)
+        cur = await self._conn.execute(f"SELECT uid FROM seen_orders WHERE uid IN ({marks})", uids)
         seen = {r[0] for r in await cur.fetchall()}
         return set(uids) - seen
 
     async def mark_orders_seen(self, orders: list[dict]) -> None:
-        assert self._db
-        await self._db.executemany(
+        await self._conn.executemany(
             "INSERT OR IGNORE INTO seen_orders (uid, source, title, url, budget, matched) "
             "VALUES (?, ?, ?, ?, ?, ?)",
             [
@@ -276,16 +278,14 @@ class Database:
                 for o in orders
             ],
         )
-        await self._db.commit()
+        await self._conn.commit()
 
     async def count_orders_by_source(self) -> dict[str, int]:
-        assert self._db
-        cur = await self._db.execute("SELECT source, COUNT(*) FROM seen_orders GROUP BY source")
+        cur = await self._conn.execute("SELECT source, COUNT(*) FROM seen_orders GROUP BY source")
         return {r[0]: r[1] for r in await cur.fetchall()}
 
     async def recent_matched_orders(self, limit: int = 200) -> list[dict]:
-        assert self._db
-        cur = await self._db.execute(
+        cur = await self._conn.execute(
             "SELECT source, title, budget, created_at, url FROM seen_orders "
             "WHERE matched = 1 ORDER BY created_at DESC LIMIT ?",
             (limit,),
@@ -300,31 +300,38 @@ class Database:
     # ------------------------------------------------------------------
 
     async def get_setting(self, chat_id: int, key: str, default=None):
-        assert self._db
-        cur = await self._db.execute(
+        cur = await self._conn.execute(
             "SELECT value FROM chat_settings WHERE chat_id = ? AND key = ?", (chat_id, key)
         )
         row = await cur.fetchone()
         return json.loads(row[0]) if row else default
 
+    async def get_many_settings(self, chat_id: int, keys: list[str]) -> dict:
+        """Несколько настроек чата одним запросом (вместо N одиночных)."""
+        if not keys:
+            return {}
+        marks = ",".join("?" for _ in keys)
+        cur = await self._conn.execute(
+            f"SELECT key, value FROM chat_settings WHERE chat_id = ? AND key IN ({marks})",
+            (chat_id, *keys),
+        )
+        return {k: json.loads(v) for k, v in await cur.fetchall()}
+
     async def set_setting(self, chat_id: int, key: str, value) -> None:
-        assert self._db
-        await self._db.execute(
+        await self._conn.execute(
             "INSERT INTO chat_settings (chat_id, key, value) VALUES (?, ?, ?) "
             "ON CONFLICT(chat_id, key) DO UPDATE SET value = excluded.value",
             (chat_id, key, json.dumps(value, ensure_ascii=False)),
         )
-        await self._db.commit()
+        await self._conn.commit()
 
     async def all_values(self, key: str) -> list:
         """Values of a setting across all chats."""
-        assert self._db
-        cur = await self._db.execute("SELECT value FROM chat_settings WHERE key = ?", (key,))
+        cur = await self._conn.execute("SELECT value FROM chat_settings WHERE key = ?", (key,))
         return [json.loads(r[0]) for r in await cur.fetchall()]
 
     async def chats_with_setting(self, key: str, value) -> list[int]:
-        assert self._db
-        cur = await self._db.execute(
+        cur = await self._conn.execute(
             "SELECT chat_id FROM chat_settings WHERE key = ? AND value = ?",
             (key, json.dumps(value, ensure_ascii=False)),
         )
@@ -335,13 +342,11 @@ class Database:
     # ------------------------------------------------------------------
 
     async def get_known_tg_user_ids(self) -> set[int]:
-        assert self._db
-        cur = await self._db.execute("SELECT user_id FROM tg_leads")
+        cur = await self._conn.execute("SELECT user_id FROM tg_leads")
         return {r[0] for r in await cur.fetchall()}
 
     async def save_tg_leads(self, leads: list[dict], niche: str = "") -> None:
-        assert self._db
-        await self._db.executemany(
+        await self._conn.executemany(
             "INSERT OR IGNORE INTO tg_leads (user_id, username, name, niche, chats) VALUES (?, ?, ?, ?, ?)",
             [
                 (lead["user_id"], lead.get("username", ""), lead.get("name", ""), niche,
@@ -349,4 +354,4 @@ class Database:
                 for lead in leads
             ],
         )
-        await self._db.commit()
+        await self._conn.commit()

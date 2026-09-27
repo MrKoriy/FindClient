@@ -40,6 +40,16 @@ load_dotenv("crm.env")
 
 log = logging.getLogger("crm")
 
+
+def _int_or_400(raw: str | None, name: str, default: int | None = None) -> tuple[int | None, web.Response | None]:
+    """Числовой query/path-параметр. Некорректный - это 400, а не сырой 500."""
+    if raw is None:
+        return default, None
+    try:
+        return int(raw), None
+    except ValueError:
+        return None, web.json_response({"error": f"{name} должен быть числом"}, status=400)
+
 STATIC = pathlib.Path(__file__).resolve().parent / "static"
 HOST = os.environ.get("CRM_HOST", "127.0.0.1")
 PORT = int(os.environ.get("CRM_PORT", "8787"))
@@ -161,8 +171,13 @@ async def api_summary(request: web.Request) -> web.Response:
 
 async def api_targets(request: web.Request) -> web.Response:
     q = request.query
-    limit = min(int(q.get("limit", 200)), 1000)
-    offset = int(q.get("offset", 0))
+    limit, err = _int_or_400(q.get("limit"), "limit", 200)
+    if err:
+        return err
+    offset, err = _int_or_400(q.get("offset"), "offset", 0)
+    if err:
+        return err
+    limit = min(limit, 1000)
     items = await crm_db.list_targets(
         status=q.get("status"),
         city=q.get("city") or None,
@@ -195,7 +210,9 @@ async def api_seed_demo_targets(request: web.Request) -> web.Response:
 
 
 async def api_target_status(request: web.Request) -> web.Response:
-    target_id = int(request.match_info["id"])
+    target_id, err = _int_or_400(request.match_info["id"], "id")
+    if err:
+        return err
     data = await request.json()
     try:
         await crm_db.set_target_status(target_id, data.get("status", ""), data.get("note"))
@@ -205,7 +222,9 @@ async def api_target_status(request: web.Request) -> web.Response:
 
 
 async def api_target_username(request: web.Request) -> web.Response:
-    target_id = int(request.match_info["id"])
+    target_id, err = _int_or_400(request.match_info["id"], "id")
+    if err:
+        return err
     data = await request.json()
     await crm_db.save_target_username(target_id, (data.get("username") or "").strip())
     return web.json_response({"ok": True, "target": await crm_db.get_target(target_id)})
@@ -213,12 +232,16 @@ async def api_target_username(request: web.Request) -> web.Response:
 
 async def api_preview(request: web.Request) -> web.Response:
     """Показывает, что именно уйдёт цели. Ничего не отправляет."""
-    target_id = int(request.query.get("target_id", "0"))
+    target_id, err = _int_or_400(request.query.get("target_id"), "target_id", 0)
+    if err:
+        return err
     body = request.query.get("body")
     with_link = request.query.get("with_link", "0") == "1"
 
     if body is None:
-        template_id = int(request.query.get("template_id", "0"))
+        template_id, terr = _int_or_400(request.query.get("template_id"), "template_id", 0)
+        if terr:
+            return terr
         found = [t for t in await crm_db.list_templates() if t["id"] == template_id]
         if not found:
             return web.json_response({"error": "шаблон не найден"}, status=404)
@@ -248,10 +271,18 @@ async def api_queue(request: web.Request) -> web.Response:
         return web.json_response({"error": "пустой текст"}, status=400)
 
     if not chat and target_id:
-        target = await crm_db.get_target(int(target_id))
+        try:
+            target = await crm_db.get_target(int(target_id))
+        except (TypeError, ValueError):
+            return web.json_response({"error": "target_id должен быть числом"}, status=400)
         if not target:
             return web.json_response({"error": "цель не найдена"}, status=404)
         chat = target.get("username") or ""
+
+    try:
+        target_id_int = int(target_id) if target_id else None
+    except (TypeError, ValueError):
+        return web.json_response({"error": "target_id должен быть числом"}, status=400)
 
     if kind == "dm" and not chat:
         return web.json_response(
@@ -260,14 +291,15 @@ async def api_queue(request: web.Request) -> web.Response:
             status=400,
         )
 
-    message_id = await crm_db.queue_message(
-        int(target_id) if target_id else None, chat, body, kind=kind
-    )
+    message_id = await crm_db.queue_message(target_id_int, chat, body, kind=kind)
     return web.json_response({"ok": True, "message_id": message_id})
 
 
 async def api_messages(request: web.Request) -> web.Response:
-    limit = min(int(request.query.get("limit", 100)), 1000)
+    limit, err = _int_or_400(request.query.get("limit"), "limit", 100)
+    if err:
+        return err
+    limit = min(limit, 1000)
     return web.json_response({"items": await crm_db.list_messages(limit)})
 
 
@@ -283,7 +315,10 @@ async def api_templates(request: web.Request) -> web.Response:
 
 
 async def api_template_delete(request: web.Request) -> web.Response:
-    await crm_db.delete_template(int(request.match_info["id"]))
+    template_id, err = _int_or_400(request.match_info["id"], "id")
+    if err:
+        return err
+    await crm_db.delete_template(template_id)
     return web.json_response({"ok": True})
 
 
@@ -307,8 +342,11 @@ async def api_import_groups(request: web.Request) -> web.Response:
 
 
 async def api_group_posted(request: web.Request) -> web.Response:
+    group_id, err = _int_or_400(request.match_info["id"], "id")
+    if err:
+        return err
     data = await request.json()
-    await crm_db.mark_group_posted(int(request.match_info["id"]), data.get("note", ""))
+    await crm_db.mark_group_posted(group_id, data.get("note", ""))
     return web.json_response({"ok": True})
 
 
@@ -337,7 +375,10 @@ async def api_offer_generate(request: web.Request) -> web.Response:
     target_id = data.get("target_id")
     target = data.get("target") or {}
     if target_id and not target:
-        target = await crm_db.get_target(int(target_id)) or {}
+        try:
+            target = await crm_db.get_target(int(target_id)) or {}
+        except (TypeError, ValueError):
+            return web.json_response({"error": "target_id должен быть числом"}, status=400)
 
     strategy_id = data.get("strategy_id", "lost_traffic")
     with_link = bool(data.get("with_link", False))
@@ -373,7 +414,10 @@ async def api_offer_classify(request: web.Request) -> web.Response:
     target_id = data.get("target_id")
     target = data.get("target") or {}
     if target_id and not target:
-        target = await crm_db.get_target(int(target_id)) or {}
+        try:
+            target = await crm_db.get_target(int(target_id)) or {}
+        except (TypeError, ValueError):
+            return web.json_response({"error": "target_id должен быть числом"}, status=400)
 
     with_link = bool(data.get("with_link", False))
 
@@ -398,7 +442,10 @@ async def api_offer_improve(request: web.Request) -> web.Response:
     target_id = data.get("target_id")
     target = data.get("target") or {}
     if target_id and not target:
-        target = await crm_db.get_target(int(target_id)) or {}
+        try:
+            target = await crm_db.get_target(int(target_id)) or {}
+        except (TypeError, ValueError):
+            return web.json_response({"error": "target_id должен быть числом"}, status=400)
 
     settings = await crm_db.get_settings()
     api_key = settings.get("typesafe_api_key") or os.environ.get("TYPESAFE_API_KEY", "")

@@ -175,13 +175,31 @@ async def connect(path: str | None = None):
 
 
 async def init_db(path: str | None = None) -> None:
-    """Создаёт схему и дописывает недостающие настройки."""
+    """Создаёт схему, дописывает недостающие настройки, докатывает колонки."""
     async with connect(path) as conn:
         await conn.executescript(SCHEMA)
         for key, value in DEFAULT_SETTINGS.items():
             await conn.execute(
                 "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, value)
             )
+        await _migrate(conn)
+
+
+# Добавление колонок к уже существующим таблицам. CREATE TABLE IF NOT EXISTS
+# на живой базе молча ничего не делает, и первая же запись в новую колонку
+# падает «no such column». Здесь тот же приём, что у бота в db/database.py.
+_COLUMN_MIGRATIONS: dict[str, list[tuple[str, str]]] = {
+    # "targets": [("telegram_id", "INTEGER")],
+}
+
+
+async def _migrate(conn: aiosqlite.Connection) -> None:
+    for table, columns in _COLUMN_MIGRATIONS.items():
+        cur = await conn.execute(f"PRAGMA table_info({table})")
+        existing = {row[1] for row in await cur.fetchall()}
+        for name, decl in columns:
+            if name not in existing:
+                await conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
 
 
 async def get_settings(path: str | None = None) -> dict[str, str]:

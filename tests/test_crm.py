@@ -686,3 +686,24 @@ async def test_panel_responsive_during_slow_ai_call(crm_path, monkeypatch):
         assert resp.status == 200
         data = await resp.json()
         assert data["text"].startswith("Здравствуйте!")
+
+
+@pytest.mark.asyncio
+async def test_non_numeric_params_return_400_not_500(crm_path, monkeypatch):
+    import base64
+
+    from aiohttp.test_utils import TestClient, TestServer
+
+    from crm import app as crm_app
+
+    monkeypatch.setattr(crm_app, "USER", "admin")
+    monkeypatch.setattr(crm_app, "PASSWORD", "secret")
+    monkeypatch.setattr(crm_db, "DEFAULT_CRM_DB", crm_path)
+
+    auth = base64.b64encode(b"admin:secret").decode("utf-8")
+    headers = {"Authorization": f"Basic {auth}"}
+    app = crm_app.create_app()
+    async with TestClient(TestServer(app), headers=headers) as client:
+        for url in ("/api/targets?limit=abc", "/api/messages?limit=zz", "/api/targets?offset=x"):
+            r = await client.get(url)
+            assert r.status == 400, url

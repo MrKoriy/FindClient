@@ -1,8 +1,10 @@
 """Company search orchestration: sources (2GIS, Yandex) -> merge -> filter -> dedup -> save -> table."""
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 
 import aiohttp
 
@@ -119,8 +121,16 @@ def merge_organizations(orgs: list[Organization]) -> tuple[list[Organization], i
     return unique, merged
 
 
+Searcher = Callable[..., Awaitable[list[Organization]]]
+
+
 class ScrapeService:
-    """Runs a search across map sources with fallbacks, so one failing source never stops the job."""
+    """Runs a search across map sources with fallbacks, so one failing source never stops the job.
+
+    Поисковики можно передать снаружи (searchers=...) - тестам не нужен
+    patch.object, а источники собираются параллельно: 2GIS и Яндекс не
+    зависят друг от друга.
+    """
 
     def __init__(
         self,
@@ -128,14 +138,20 @@ class ScrapeService:
         request_delay: float = 0.3,
         yandex_api_key: str = "",
         proxy: str = "",
+        searchers: dict[str, Searcher] | None = None,
     ) -> None:
         self.db = db
         self.request_delay = request_delay
         self.yandex_api_key = yandex_api_key
         self.proxy = proxy
+        # Ключи 2GIS лежат рядом с базой: рестарт сохраняет рабочий ключ.
+        self.creds_path = Path(db.path).parent / "twogis_creds.json"
+        self.searchers = searchers or {"2gis": self._search_2gis, "yandex": self._search_yandex}
 
     async def _search_2gis(self, session, query, req, need, skip, progress) -> list[Organization]:
-        api = TwoGISApi(session, request_delay=self.request_delay, proxy=self.proxy)
+        api = TwoGISApi(
+            session, request_delay=self.request_delay, proxy=self.proxy, creds_path=self.creds_path,
+        )
 
         async def on_page(done: int, total: int) -> None:
             await progress(f"2GIS «{query}»: {done}/{total}")
@@ -153,8 +169,8 @@ class ScrapeService:
             region_id, slug, city_name = "", "moscow", req.city
             try:
                 region_id, slug, city_name = await api.resolve_city(req.city)
-            except Exception:
-                pass
+            except Exception as exc:
+                log.warning("не удалось определить регион «%s», ищем как в Москве: %s", req.city, exc)
             client = TwoGISClient(
                 session=session, request_delay=self.request_delay,
                 city_slug=slug or "moscow", city_name=city_name,
@@ -192,28 +208,33 @@ class ScrapeService:
         found: list[Organization] = []
         per_source: dict[str, int] = {}
         errors: list[str] = []
-        searchers = {"2gis": self._search_2gis, "yandex": self._search_yandex}
+
+        async def collect(source: str) -> tuple[list[Organization], str | None]:
+            """Один источник: все запросы по очереди, исключение не роняет остальные."""
+            search = self.searchers.get(source)
+            if not search:
+                return [], None
+            got: list[Organization] = []
+            for query in req.queries:
+                need = req.count - len(got)
+                if need <= 0:
+                    break
+                skip = known | {o.id for o in got}
+                try:
+                    got += await search(session, query, req, need, skip, progress)
+                except Exception as exc:
+                    log.exception("%s search failed", source)
+                    return got, f"{SOURCE_LABELS.get(source, source)}: {exc}"
+            return got, None
 
         timeout = aiohttp.ClientTimeout(total=60)
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            for source in req.sources:
-                search = searchers.get(source)
-                if not search:
-                    continue
-                got: list[Organization] = []
-                for query in req.queries:
-                    need = req.count - len(got)
-                    if need <= 0:
-                        break
-                    skip = known | {o.id for o in got}
-                    try:
-                        got += await search(session, query, req, need, skip, progress)
-                    except Exception as exc:
-                        log.exception("%s search failed", source)
-                        errors.append(f"{SOURCE_LABELS.get(source, source)}: {exc}")
-                        break
-                per_source[source] = len(got)
-                found += got
+            results = await asyncio.gather(*(collect(s) for s in req.sources))
+        for source, (got, err) in zip(req.sources, results, strict=True):
+            per_source[source] = len(got)
+            found += got
+            if err:
+                errors.append(err)
 
         total_scraped = len(found)
         unique, merged = merge_organizations(found)

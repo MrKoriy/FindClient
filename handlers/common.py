@@ -1,5 +1,6 @@
 """Shared UI helpers: access control, keyboards, throttled progress messages."""
 
+import logging
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -13,6 +14,8 @@ from aiogram.types import (
     Message,
     TelegramObject,
 )
+
+log = logging.getLogger(__name__)
 
 CITIES = (
     "Москва", "Санкт-Петербург", "Новосибирск", "Екатеринбург", "Казань",
@@ -97,8 +100,8 @@ class Progress:
         self._last, self._text = now, text
         try:
             await self.message.edit_text(f"{self.prefix}\n\n⏳ {text}")
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("progress edit: %s", exc)
 
 
 async def safe_edit(callback: CallbackQuery, text: str, markup: InlineKeyboardMarkup | None = None, **kw) -> None:

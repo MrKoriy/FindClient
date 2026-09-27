@@ -62,12 +62,13 @@ class OrdersService:
         self._task: asyncio.Task | None = None
 
     async def chat_config(self, chat_id: int) -> dict:
+        stored = await self.db.get_many_settings(chat_id, [ENABLED, KEYWORDS, MINUS, SOURCES_KEY, TG_CHANNELS])
         return {
-            "enabled": await self.db.get_setting(chat_id, ENABLED, False),
-            "keywords": await self.db.get_setting(chat_id, KEYWORDS, list(DEFAULT_KEYWORDS)),
-            "minus": await self.db.get_setting(chat_id, MINUS, []),
-            "sources": await self.db.get_setting(chat_id, SOURCES_KEY, list(DEFAULT_SOURCES)),
-            "tg_channels": await self.db.get_setting(chat_id, TG_CHANNELS, list(DEFAULT_TG_CHANNELS)),
+            "enabled": stored.get(ENABLED, False),
+            "keywords": stored.get(KEYWORDS, list(DEFAULT_KEYWORDS)),
+            "minus": stored.get(MINUS, []),
+            "sources": stored.get(SOURCES_KEY, list(DEFAULT_SOURCES)),
+            "tg_channels": stored.get(TG_CHANNELS, list(DEFAULT_TG_CHANNELS)),
         }
 
     async def fetch_all(self, sources: set[str], tg_channels: set[str]) -> list[Order]:

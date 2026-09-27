@@ -1,10 +1,9 @@
-import os
-
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo
 
+from config import Settings
 from crm import auth as crm_auth
 from handlers.common import MAIN_MENU, safe_edit
 
@@ -35,10 +34,9 @@ HELP = (
 )
 
 
-def make_crm_auth_view(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
+def make_crm_auth_view(user_id: int, crm_url: str) -> tuple[str, InlineKeyboardMarkup]:
     token = crm_auth.generate_magic_token(user_id)
-    crm_base = os.environ.get("CRM_URL", "https://94-103-1-126.sslip.io:9444").rstrip("/")
-    login_url = f"{crm_base}/auth?token={token}"
+    login_url = f"{crm_url.rstrip('/')}/auth?token={token}"
 
     text = (
         "<b>Панель FindClient CRM</b>\n\n"
@@ -76,19 +74,19 @@ async def cmd_cancel(message: Message, state: FSMContext) -> None:
 
 
 @router.message(Command("crm"))
-async def cmd_crm(message: Message, state: FSMContext) -> None:
+async def cmd_crm(message: Message, state: FSMContext, settings: Settings) -> None:
     await state.clear()
     uid = message.from_user.id if message.from_user else 0
-    text, markup = make_crm_auth_view(uid)
+    text, markup = make_crm_auth_view(uid, settings.CRM_URL)
     await message.answer(text, reply_markup=markup, parse_mode="HTML")
 
 
 @router.callback_query(F.data == "menu:crm")
-async def on_crm_menu(callback: CallbackQuery, state: FSMContext) -> None:
+async def on_crm_menu(callback: CallbackQuery, state: FSMContext, settings: Settings) -> None:
     await callback.answer()
     await state.clear()
     uid = callback.from_user.id if callback.from_user else 0
-    text, markup = make_crm_auth_view(uid)
+    text, markup = make_crm_auth_view(uid, settings.CRM_URL)
     await safe_edit(callback, text, markup, parse_mode="HTML")
 
 

@@ -20,7 +20,6 @@ class Settings:
     """Application configuration loaded from .env file."""
 
     BOT_TOKEN: str
-    PAGE_SIZE: int = 50
     REQUEST_DELAY: float = 0.3
     # Telegram user IDs allowed to use the bot. Empty = anyone (not recommended).
     OWNER_IDS: frozenset[int] = field(default_factory=frozenset)
@@ -33,10 +32,8 @@ class Settings:
     TG_SESSION: str = ""
     ORDERS_POLL_INTERVAL: int = 300
     HTTP_PROXY: str = ""
-
-    @property
-    def telegram_user_enabled(self) -> bool:
-        return bool(self.TG_API_ID and self.TG_API_HASH and self.TG_SESSION)
+    # База CRM-панели для кнопки /crm: куда вести юзера за одноразовым токеном.
+    CRM_URL: str = "https://94-103-1-126.sslip.io:9444"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -67,4 +64,5 @@ class Settings:
             TG_SESSION=env("TG_SESSION", "").strip(),
             ORDERS_POLL_INTERVAL=int(env("ORDERS_POLL_INTERVAL", "300") or 300),
             HTTP_PROXY=env("HTTP_PROXY", "").strip(),
+            CRM_URL=env("CRM_URL", "").strip() or "https://94-103-1-126.sslip.io:9444",
         )

@@ -21,12 +21,6 @@ class TestSettingsFromEnv:
         with pytest.raises(ValueError, match="BOT_TOKEN"):
             Settings.from_env()
 
-    def test_has_default_page_size(self, monkeypatch):
-        """Settings has a default PAGE_SIZE of 50."""
-        monkeypatch.setenv("BOT_TOKEN", "test-bot-token-123")
-        settings = Settings.from_env()
-        assert settings.PAGE_SIZE == 50
-
     def test_has_default_request_delay(self, monkeypatch):
         """Settings has a default REQUEST_DELAY of 0.3."""
         monkeypatch.setenv("BOT_TOKEN", "test-bot-token-123")

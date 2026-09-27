@@ -10,7 +10,6 @@ A Bot API bot cannot read groups it is not a member of, hence the user account.
 """
 
 import asyncio
-import html
 import logging
 import random
 import re
@@ -19,7 +18,7 @@ from datetime import datetime
 
 import aiohttp
 
-from api.common import USER_AGENTS, phone_key
+from api.common import phone_key
 from api.orders import fetch_tg_channel_posts
 from data.niches import NICHES
 from models.order import Order
@@ -72,24 +71,6 @@ def _channel_username(ref: str) -> str:
     return (m.group(1) if m else ref).lstrip("@")
 
 
-async def chat_info(session: aiohttp.ClientSession, username: str) -> dict:
-    """Title, type (group/channel) and member count from the public t.me page."""
-    username = _channel_username(username)
-    async with session.get(f"https://t.me/{username}", headers={"User-Agent": random.choice(USER_AGENTS)}) as r:
-        page = await r.text()
-    title = re.search(r'<meta property="og:title" content="([^"]*)"', page)
-    extra = re.search(r'<div class="tgme_page_extra">([^<]*)</div>', page)
-    extra_text = html.unescape(extra.group(1)) if extra else ""
-    num = re.sub(r"[^\d]", "", extra_text.split(",")[0]) if extra_text else ""
-    return {
-        "username": username,
-        "title": html.unescape(title.group(1)) if title else username,
-        "type": "channel" if "subscriber" in extra_text or "подписч" in extra_text else
-                "group" if "member" in extra_text or "участник" in extra_text else "user",
-        "members": int(num) if num else 0,
-    }
-
-
 async def harvest_channels(
     channels: list[str], pages: int = 3, on_progress: Progress | None = None,
 ) -> list[TgLead]:
@@ -113,7 +94,8 @@ async def harvest_channels(
                 if not batch:
                     break
                 posts += batch
-                before = min(int(p["id"]) for p in batch if p["id"].isdigit())
+                ids = [int(p["id"]) for p in batch if p["id"].isdigit()]
+                before = min(ids) if ids else before
                 await asyncio.sleep(random.uniform(0.8, 1.5))
             for p in posts:
                 text = p["text"] + "\n" + "\n".join(p.get("links", []))
@@ -268,8 +250,8 @@ class TelegramUserService:
                     lead.bio = full.full_user.about or ""
                     if lead.bio:
                         lead.score = min(100, lead.score + 10)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log.debug("био %s недоступно: %s", lead.user_id, exc)
                 await asyncio.sleep(random.uniform(0.8, 1.6))
         return sorted(leads.values(), key=lambda lead: lead.score, reverse=True)
 

@@ -64,22 +64,22 @@ class TwoGISError(RuntimeError):
     pass
 
 
-def _creds_path() -> Path:
+def _default_creds_path() -> Path:
     """Sidecar next to the database, so a restart keeps a working key."""
     return Path(os.environ.get("DB_PATH", "scraper.db")).parent / "twogis_creds.json"
 
 
-def _load_creds() -> tuple[str, str] | None:
+def _load_creds(path: Path) -> tuple[str, str] | None:
     try:
-        saved = json.loads(_creds_path().read_text(encoding="utf-8"))
+        saved = json.loads(path.read_text(encoding="utf-8"))
         return saved["key"], saved["salt"]
     except (OSError, ValueError, KeyError):
         return None
 
 
-def _save_creds(key: str, secret: str) -> None:
+def _save_creds(path: Path, key: str, secret: str) -> None:
     try:
-        _creds_path().write_text(json.dumps({"key": key, "salt": secret}), encoding="utf-8")
+        path.write_text(json.dumps({"key": key, "salt": secret}), encoding="utf-8")
     except OSError as exc:
         log.debug("Не удалось сохранить ключ 2GIS: %s", exc)
 
@@ -152,8 +152,8 @@ class _EdgeResolver(aiohttp.abc.AbstractResolver):
 
 
 class TwoGISApi:
-    _creds: tuple[str, str, float] | None = None  # (key, secret, fetched_at), shared per process
-    _regions: dict[str, tuple[str, str, str]] = {}
+    # Маршрут до 2GIS - свойство хоста, а не экземпляра: прямая дорога либо
+    # доступна всему процессу, либо фильтруется всему процессу.
     # None = direct route untried, False = it is filtered, so stop paying for it.
     _direct_ok: bool | None = None
 
@@ -162,12 +162,18 @@ class TwoGISApi:
         session: aiohttp.ClientSession,
         request_delay: float = 0.3,
         proxy: str = "",
+        creds_path: Path | None = None,
     ) -> None:
         self.session = session
         self.request_delay = request_delay
         self.proxy = proxy or None
         self.ua = random.choice(USER_AGENTS[:3])
         self._edge_session: aiohttp.ClientSession | None = None
+        # (key, secret, fetched_at) на экземпляр: параллельные поиски не
+        # дерутся за общий кеш. Переживает рестарт через sidecar-файл.
+        self._creds: tuple[str, str, float] | None = None
+        self._regions: dict[str, tuple[str, str, str]] = {}
+        self.creds_path = creds_path or _default_creds_path()
 
     async def close(self) -> None:
         """Release the edge session, if one was opened."""
@@ -264,7 +270,7 @@ class TwoGISApi:
         return key_m.group(1), secret_m.group(1)
 
     async def _credentials(self, force: bool = False) -> tuple[str, str]:
-        cached = TwoGISApi._creds
+        cached = self._creds
         if cached and not force and time.time() - cached[2] < _CRED_TTL:
             return cached[0], cached[1]
 
@@ -272,7 +278,7 @@ class TwoGISApi:
         # the key over one bad response would take the source down until it recovers.
         # So refresh when it is cheap, and fall back to what we already have when it
         # is not. TWOGIS_WEB_KEY/TWOGIS_SIGN_SALT in .env are the last resort.
-        fallback = cached[:2] if cached else (_load_creds() or _env_creds())
+        fallback = cached[:2] if cached else (_load_creds(self.creds_path) or _env_creds())
         try:
             pair = await self._fetch_creds()
         except Exception as exc:
@@ -280,11 +286,11 @@ class TwoGISApi:
                 raise TwoGISError(f"Не удалось получить ключ 2GIS: {exc}") from exc
             log.warning("Не удалось обновить ключ 2GIS (%s) — работаю на прежнем", exc)
             # Stale enough to be retried in _RETRY_AFTER, not in six hours.
-            TwoGISApi._creds = (*fallback, time.time() - _CRED_TTL + _RETRY_AFTER)
+            self._creds = (*fallback, time.time() - _CRED_TTL + _RETRY_AFTER)
             return fallback
 
-        TwoGISApi._creds = (*pair, time.time())
-        _save_creds(*pair)
+        self._creds = (*pair, time.time())
+        _save_creds(self.creds_path, *pair)
         return pair
 
     async def _call(self, path: str, params: dict[str, Any], signed: bool = True) -> dict:
@@ -322,8 +328,8 @@ class TwoGISApi:
     async def resolve_city(self, city: str) -> tuple[str, str, str]:
         """City name -> (region_id, slug, canonical name). region_id '' if unknown to 2GIS."""
         k = city.strip().lower()
-        if k in TwoGISApi._regions:
-            return TwoGISApi._regions[k]
+        if k in self._regions:
+            return self._regions[k]
         data = await self._call(
             "/2.0/region/search", {"q": city, "fields": "items.code"}, signed=False
         )
@@ -332,7 +338,7 @@ class TwoGISApi:
         if items and str(items[0].get("id", "0")) != "0":
             it = items[0]
             found = (str(it["id"]), it.get("code", ""), it.get("name", city))
-        TwoGISApi._regions[k] = found
+        self._regions[k] = found
         return found
 
     # ------------------------------------------------------------------
