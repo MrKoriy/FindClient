@@ -511,119 +511,550 @@
     color: var(--text-primary);
   }
 
-  /* Offer Studio Grid */
-  .studio-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 20px;
-    align-items: start;
-  }
-  @media (max-width: 960px) {
-    .studio-grid { grid-template-columns: 1fr; }
-  }
+  /* ========================================================================= */
+  /* Offer Studio Redesign (Mobile-First, Streamlined AI Workflow)             */
+  /* ========================================================================= */
 
-  /* Strategy Card Selector */
-  .strategy-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    margin-bottom: 14px;
-  }
-  .strategy-card {
-    border: 1px solid var(--border);
-    background: var(--bg-subtle);
-    border-radius: var(--radius-sm);
-    padding: 10px 12px;
-    cursor: pointer;
-    transition: var(--transition);
-  }
-  .strategy-card:hover {
-    border-color: var(--border-strong);
-    background: var(--bg-card-hover);
-  }
-  .strategy-card.selected {
-    border-color: var(--primary);
-    background: var(--primary-light);
-  }
-  .strategy-name {
-    font-weight: 600;
-    font-size: 13px;
-    margin-bottom: 3px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .strategy-desc {
-    font-size: 11.5px;
-    color: var(--text-secondary);
-    line-height: 1.35;
-  }
-
-  /* Candidate Cards (Jev Multi-Candidate Selection) */
-  .candidates-grid {
+  .offer-studio-shell {
+    max-width: 1040px;
+    margin: 0 auto;
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    margin-top: 8px;
-    margin-bottom: 4px;
+    gap: 14px;
   }
-  .candidate-card {
-    border: 1px solid var(--border);
-    background: var(--bg-subtle);
-    border-radius: var(--radius-sm);
-    padding: 11px 13px;
-    cursor: pointer;
-    transition: var(--transition);
-  }
-  .candidate-card:hover {
-    border-color: var(--primary);
-    background: var(--bg-card-hover);
-  }
-  .candidate-card.active {
-    border-color: var(--primary);
-    background: var(--primary-light);
-    box-shadow: 0 0 0 1px var(--primary);
-  }
-  .candidate-head {
+
+  /* Compact Hero Header */
+  .offer-hero-bar {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 5px;
+    gap: 10px;
+    flex-wrap: wrap;
   }
-  .candidate-title {
-    font-size: 13px;
+  .offer-title-group h1 {
+    font-size: 18px;
+    font-weight: 700;
+    margin: 0 0 2px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .offer-title-group .dim {
+    font-size: 12px;
+  }
+  .offer-model-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-full);
+    padding: 4px 10px;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+  .offer-model-pill select {
+    background: transparent;
+    border: none;
+    font-size: 12px;
     font-weight: 600;
     color: var(--text-primary);
+    padding: 0;
+    cursor: pointer;
+    outline: none;
   }
-  .candidate-badge {
-    font-size: 11px;
-    font-weight: 600;
-    padding: 2px 8px;
-    border-radius: var(--radius-full);
+
+  /* Active Target Card */
+  .offer-target-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    box-shadow: var(--shadow-sm);
+    transition: var(--transition);
+  }
+  .offer-target-card:hover {
+    border-color: var(--border-strong);
+  }
+  .target-card-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .target-card-info {
+    flex: 1;
+    min-width: 0;
+  }
+  .target-card-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 3px;
+    flex-wrap: wrap;
+  }
+  .target-card-name {
+    font-weight: 700;
+    font-size: 14.5px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 240px;
+  }
+  .target-card-meta {
+    font-size: 12px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .target-badge-pill {
     display: inline-flex;
     align-items: center;
     gap: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: var(--radius-full);
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
   }
-  .candidate-badge.winner {
+  .target-badge-pill.tg-ok {
     background: var(--ok-light);
     color: var(--ok);
-    border: 1px solid var(--ok);
+    border-color: var(--ok);
   }
-  .candidate-badge.alt {
+  .target-badge-pill.star-pill {
+    background: var(--warn-light);
+    color: var(--warn);
+    border-color: var(--warn);
+  }
+
+  /* Strategy Horizontal Scroll Chips */
+  .strategy-scroll-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding: 2px 2px 4px;
+    margin: -2px -2px 0;
+  }
+  .strategy-scroll-wrap::-webkit-scrollbar {
+    display: none;
+  }
+  .strategy-chip {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-full);
+    padding: 8px 14px;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    transition: var(--transition);
+    min-height: 40px;
+  }
+  .strategy-chip:hover {
+    border-color: var(--border-strong);
+    color: var(--text-primary);
+  }
+  .strategy-chip.selected {
+    background: var(--purple-light);
+    border-color: var(--purple);
+    color: var(--purple);
+    font-weight: 600;
+    box-shadow: 0 0 0 1px var(--purple);
+  }
+
+  /* Prompt Hint & Link Bar */
+  .prompt-hint-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 6px 10px 6px 12px;
+  }
+  .prompt-hint-bar input {
+    flex: 1;
+    border: none;
+    background: transparent;
+    font-size: 13px;
+    padding: 4px 0;
+    outline: none;
+    color: var(--text-primary);
+  }
+  .prompt-hint-bar input::placeholder {
+    color: var(--text-dim);
+  }
+  .prompt-hint-link-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11.5px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+    cursor: pointer;
+    user-select: none;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+  }
+
+  /* Main Responsive Studio Layout */
+  .studio-layout {
+    display: grid;
+    grid-template-columns: 1.15fr 0.85fr;
+    gap: 16px;
+    align-items: start;
+  }
+  @media (max-width: 900px) {
+    .studio-layout {
+      grid-template-columns: 1fr;
+      gap: 14px;
+    }
+  }
+
+  /* Candidate Variant Tabs */
+  .candidate-tabs-bar {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    margin-bottom: 10px;
+    padding-bottom: 2px;
+  }
+  .candidate-tabs-bar::-webkit-scrollbar {
+    display: none;
+  }
+  .candidate-tab-pill {
+    flex: 1;
+    min-width: 120px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    cursor: pointer;
+    transition: var(--transition);
+    text-align: left;
+    user-select: none;
+  }
+  .candidate-tab-pill:hover {
+    border-color: var(--border-strong);
+  }
+  .candidate-tab-pill.active {
+    background: var(--primary-light);
+    border-color: var(--primary);
+    box-shadow: 0 0 0 1px var(--primary);
+  }
+  .candidate-tab-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2px;
+  }
+  .candidate-tab-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  .candidate-tab-score {
+    font-size: 10.5px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: var(--radius-full);
+  }
+  .candidate-tab-score.winner {
+    background: var(--ok-light);
+    color: var(--ok);
+  }
+  .candidate-tab-score.alt {
+    background: var(--bg-subtle);
+    color: var(--text-secondary);
+  }
+  .candidate-tab-snippet {
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Chat Preview Shell (Telegram-Style Message Bubble) */
+  .chat-preview-shell {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+  }
+  .chat-preview-header {
+    background: var(--bg-subtle);
+    padding: 10px 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+  }
+  .chat-author {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  .chat-author-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: var(--radius-full);
+    background: var(--purple-light);
+    color: var(--purple);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .chat-author-avatar svg {
+    width: 14px;
+    height: 14px;
+  }
+  .chat-bubble-body {
+    padding: 14px;
+    position: relative;
+    background: var(--bg-card);
+  }
+  .offer-textarea {
+    width: 100%;
+    min-height: 145px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 15px;
+    line-height: 1.55;
+    padding: 6px;
+    resize: vertical;
+    transition: var(--transition);
+  }
+  .offer-textarea:focus {
+    background: var(--bg-subtle);
+    border-color: var(--border-strong);
+    box-shadow: none;
+  }
+  .chat-bubble-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 14px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-subtle);
+    font-size: 11.5px;
+    color: var(--text-secondary);
+  }
+
+  /* Action Buttons */
+  .offer-action-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .offer-action-primary {
+    width: 100%;
+    min-height: 48px;
+    font-size: 14.5px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .offer-action-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+  }
+  @media (max-width: 480px) {
+    .offer-action-row {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  /* Jev Judge Widget */
+  .jev-judge-widget {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px;
+    box-shadow: var(--shadow-sm);
+    position: sticky;
+    top: 74px;
+  }
+  .jev-widget-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .jev-score-pill-large {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .jev-score-circle {
+    width: 50px;
+    height: 50px;
+    border-radius: var(--radius-full);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 19px;
+    font-weight: 800;
+    line-height: 1;
+    border: 2px solid currentColor;
+    flex-shrink: 0;
+  }
+  .jev-score-circle small {
+    font-size: 8px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    margin-top: 2px;
+  }
+  .score-excellent { color: var(--ok); background: var(--ok-light); border-color: var(--ok); }
+  .score-good { color: var(--primary); background: var(--primary-light); border-color: var(--primary); }
+  .score-needs_work { color: var(--warn); background: var(--warn-light); border-color: var(--warn); }
+  .score-poor { color: var(--bad); background: var(--bad-light); border-color: var(--bad); }
+
+  .jev-score-meta h3 {
+    margin: 0 0 2px;
+    font-size: 14.5px;
+    font-weight: 700;
+  }
+  .jev-score-meta .dim {
+    font-size: 11.5px;
+  }
+  .judge-source-tag {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: var(--bg-subtle);
     color: var(--text-secondary);
     border: 1px solid var(--border);
   }
-  .candidate-text-preview {
-    font-size: 12px;
+
+  /* Dimension Meters in 2x2 Grid */
+  .dim-meters-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 12px;
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    background: var(--bg-subtle);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+  }
+  .dim-meter-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .dim-meter-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
     color: var(--text-secondary);
-    line-height: 1.4;
-    white-space: pre-wrap;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
+  }
+  .dim-meter-label b {
+    color: var(--text-primary);
+  }
+  .dimension-bar-track {
+    height: 5px;
+    background: var(--border);
+    border-radius: var(--radius-full);
     overflow: hidden;
   }
+  .dimension-bar-fill {
+    height: 100%;
+    border-radius: var(--radius-full);
+    background: var(--primary);
+    transition: width 0.3s ease;
+  }
+
+  /* Collapsible Jev Checklist */
+  .jev-accordion-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition);
+  }
+  .jev-accordion-btn:hover {
+    background: var(--bg-subtle);
+  }
+  .jev-accordion-btn svg {
+    width: 14px;
+    height: 14px;
+    transition: transform 0.2s ease;
+  }
+  .jev-accordion-btn.open svg {
+    transform: rotate(180deg);
+  }
+  .jev-accordion-body {
+    display: none;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+  }
+  .jev-accordion-body.open {
+    display: block;
+  }
+
+  /* Checklist items */
+  .checklist {
+    list-style: none;
+    padding: 0;
+    margin: 8px 0;
+  }
+  .checklist-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    margin-bottom: 6px;
+    color: var(--text-secondary);
+  }
+  .checklist-item.pass { color: var(--text-primary); }
+  .checklist-item.fail { color: var(--bad); font-weight: 500; }
+
   @keyframes spin {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
@@ -639,105 +1070,6 @@
   .flash-highlight {
     animation: flashPulse 1s ease-out;
   }
-
-  /* Jev Score Gauge & Evaluation Card */
-  .judge-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 20px;
-    position: sticky;
-    top: 80px;
-  }
-  .judge-header {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    margin-bottom: 18px;
-    padding-bottom: 16px;
-    border-bottom: 1px solid var(--border);
-  }
-  .score-badge {
-    width: 64px;
-    height: 64px;
-    border-radius: var(--radius-full);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    font-weight: 800;
-    font-size: 22px;
-    line-height: 1;
-    border: 2px solid currentColor;
-    flex-shrink: 0;
-  }
-  .score-badge small {
-    font-size: 9px;
-    font-weight: 600;
-    letter-spacing: 0.05em;
-    margin-top: 2px;
-  }
-  .score-excellent { color: var(--ok); background: var(--ok-light); border-color: var(--ok); }
-  .score-good { color: var(--primary); background: var(--primary-light); border-color: var(--primary); }
-  .score-needs_work { color: var(--warn); background: var(--warn-light); border-color: var(--warn); }
-  .score-poor { color: var(--bad); background: var(--bad-light); border-color: var(--bad); }
-
-  .judge-title-area h3 {
-    margin: 0 0 4px;
-    font-size: 17px;
-    font-weight: 700;
-  }
-  .judge-source-tag {
-    font-size: 11px;
-    font-weight: 600;
-    padding: 2px 7px;
-    border-radius: var(--radius-sm);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    background: var(--bg-subtle);
-    color: var(--text-secondary);
-    border: 1px solid var(--border);
-  }
-
-  /* Dimension Bars */
-  .dimension-row {
-    margin-bottom: 10px;
-  }
-  .dimension-labels {
-    display: flex;
-    justify-content: space-between;
-    font-size: 12px;
-    margin-bottom: 4px;
-  }
-  .dimension-bar-track {
-    height: 6px;
-    background: var(--bg-subtle);
-    border-radius: var(--radius-full);
-    overflow: hidden;
-  }
-  .dimension-bar-fill {
-    height: 100%;
-    border-radius: var(--radius-full);
-    background: var(--primary);
-    transition: width 0.3s ease;
-  }
-
-  /* Checklist items */
-  .checklist {
-    list-style: none;
-    padding: 0;
-    margin: 16px 0;
-  }
-  .checklist-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12.5px;
-    margin-bottom: 6px;
-    color: var(--text-secondary);
-  }
-  .checklist-item.pass { color: var(--text-primary); }
-  .checklist-item.fail { color: var(--bad); font-weight: 500; }
 
   /* Modals */
   dialog {
@@ -1052,23 +1384,23 @@
       gap: 8px;
     }
 
-    /* Offer Studio Mobile */
-    .studio-grid {
+    /* Offer Studio Mobile Reflow */
+    .studio-layout {
       grid-template-columns: 1fr !important;
-      gap: 14px !important;
+      gap: 12px !important;
     }
-    .strategy-grid {
-      grid-template-columns: 1fr !important;
-      gap: 8px !important;
+    .jev-judge-widget {
+      position: static !important;
+      margin-top: 4px;
     }
-    .offer-actions {
-      flex-direction: column;
-      align-items: stretch;
-      gap: 8px;
+    .target-card-name {
+      max-width: 180px;
     }
-    .offer-actions button {
-      width: 100%;
-      min-height: 44px;
+    .prompt-hint-bar {
+      flex-wrap: wrap;
+    }
+    .prompt-hint-bar input {
+      min-width: 140px;
     }
 
     /* Table Horizontal Swipe */
@@ -1208,7 +1540,13 @@ const ICONS = {
   copy: '<svg class="icon" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>',
   send: '<svg class="icon" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>',
   star: '<svg class="icon" viewBox="0 0 24 24" style="color:#f59e0b;fill:#f59e0b"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
-  sparkles: '<svg class="icon" viewBox="0 0 24 24"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>'
+  sparkles: '<svg class="icon" viewBox="0 0 24 24"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>',
+  chevronDown: '<svg class="icon" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>',
+  refresh: '<svg class="icon" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 21h5v-5"/></svg>',
+  edit: '<svg class="icon" viewBox="0 0 24 24"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>',
+  building: '<svg class="icon" viewBox="0 0 24 24"><rect width="16" height="20" x="4" y="2" rx="2" ry="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01"/><path d="M16 6h.01"/><path d="M8 10h.01"/><path d="M16 10h.01"/><path d="M8 14h.01"/><path d="M16 14h.01"/></svg>',
+  search: '<svg class="icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>',
+  bot: '<svg class="icon" viewBox="0 0 24 24"><rect width="18" height="12" x="3" y="6" rx="2"/><line x1="12" x2="12" y1="2" y2="6"/><line x1="8" x2="8" y1="18" y2="22"/><line x1="16" x2="16" y1="18" y2="22"/></svg>'
 };
 
 const VIEWS = [
@@ -1842,197 +2180,183 @@ async function viewOffers(v) {
   let activeTargetId = window.selectedOfferTargetId || (targets[0] ? targets[0].id : null);
   window.selectedOfferTargetId = null;
 
+  let isManualMode = !activeTargetId && targets.length === 0;
   let activeStrategyId = "lost_traffic";
+  let currentCandidates = [];
+  let manualData = {
+    name: "Клиника ДентаЛайн",
+    category: "стоматология",
+    city: "Москва",
+    rating: 4.9,
+    reviews: 58
+  };
 
   v.innerHTML = `
-  <div class="panel-header" style="margin-bottom:16px">
-    <div>
-      <h1 style="font-size:20px;font-weight:700;margin:0 0 4px;display:flex;align-items:center;gap:8px">
-        <span class="purple">${ICONS.sparkles}</span> Генератор оффера и AI+Jev Judge
-      </h1>
-      <div class="dim">Синтез 4 вариантов оффера и отбор сильнейшего через TypeSafe Jev System One</div>
-    </div>
-  </div>
-
-  <div class="studio-grid">
-    <!-- Left Column: Generator Controls -->
-    <div>
-      <div class="panel">
-        <div class="panel-header" style="margin-bottom:12px">
-          <h2 class="panel-title">${ICONS.targets} 1. Выберите цель или параметры бизнеса</h2>
-          <button class="btn btn-secondary btn-sm" id="btnSeedDemoOffers" title="Загрузить 5 демо-целей в базу">${ICONS.sparkles} Демо-цели</button>
-        </div>
-        <div class="row" style="margin-bottom:12px">
-          <select id="offerTargetSelect" style="flex:1">
-            <option value="">-- Ручной ввод параметров --</option>
-            ${targets.map(t => `
-              <option value="${t.id}" ${t.id === activeTargetId ? "selected" : ""}>
-                ${esc(t.name)} (${esc(t.category) || "сфера не указ."}, ${esc(t.city) || "город не указ."}) ${t.username ? "@" + esc(t.username) : ""}
-              </option>
-            `).join("")}
-          </select>
-          <button class="btn btn-secondary btn-sm" id="btnRefreshTargets" title="Обновить список целей">Обновить</button>
-        </div>
-
-        <div id="targetDetailsCard" style="background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:14px;font-size:12.5px" class="dim">
-          Выберите карточку из базы выше для автоматической подстановки отзывов, рейтинга и сферы.
-        </div>
-
-        <div style="margin-bottom:14px">
-          <label style="font-size:12px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:4px">
-            Пожелание к AI / фокус оффера (промпт-хинт):
-          </label>
-          <input id="offerPromptHint" placeholder="Например: сделать упор на бесплатный аудит / сайт за 3 дня / акция на гигиену..." style="width:100%">
-        </div>
-
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-          <h2 class="panel-title" style="margin:0">${ICONS.sparkles} 2. Стратегия оффера</h2>
-          <div style="display:flex;align-items:center;gap:6px">
-            <span class="dim" style="font-size:11.5px">Модель AI:</span>
-            <select id="selAiModel" style="font-size:12px;padding:3px 6px">
-              <option value="qwen3.8-flash" selected>Qwen 3.8 Flash (навыки РФ)</option>
-              <option value="deepseek-v4.1-flash">DeepSeek V4.1 Flash</option>
-              <option value="glm-5.3-flash">GLM 5.3 Flash</option>
-              <option value="mimo-v2.6-flash">Mimo V2.6 Flash</option>
-            </select>
-          </div>
-        </div>
-        <div class="strategy-grid">
-          ${strategies.map(s => `
-            <div class="strategy-card ${s.id === activeStrategyId ? 'selected' : ''}" data-strategy="${s.id}">
-              <div class="strategy-name">${esc(s.name)}</div>
-              <div class="strategy-desc">${esc(s.description)}</div>
-            </div>
-          `).join("")}
-        </div>
-
-        <div class="row" style="margin-top:14px">
-          <button class="btn btn-purple" id="btnGenerateOffer">
-            ${ICONS.sparkles} Сгенерировать и отобрать через Jev
-          </button>
-          <label class="dim" style="display:flex;align-items:center;gap:6px;font-size:12.5px">
-            <input type="checkbox" id="chkOfferWithLink"> со ссылкой на портфолио
-          </label>
-        </div>
+  <div class="offer-studio-shell">
+    <!-- Top Hero Bar -->
+    <div class="offer-hero-bar">
+      <div class="offer-title-group">
+        <h1><span class="purple">${ICONS.sparkles}</span> Студия офферов</h1>
+        <div class="dim">AI-синтез 4 вариантов оффера и скоринг через TypeSafe Jev Judge</div>
       </div>
-
-      <!-- Candidate Selection Section -->
-      <div class="panel" id="panelCandidates" style="margin-top:16px">
-        <div class="panel-header">
-          <div>
-            <h2 class="panel-title">${ICONS.sparkles} 3. Кандидаты от Jev AI (выбор и ранжирование)</h2>
-            <div class="panel-subtitle">Jev System One оценивает вероятность отклика и выбирает сильнейший вариант</div>
-          </div>
-          <span class="badge" id="candidatesCountBadge">4 варианта</span>
-        </div>
-        <div class="candidates-grid" id="candidatesList">
-          <div class="dim" style="font-size:12px;padding:8px">Нажмите «Сгенерировать и отобрать через Jev» для запуска анализа.</div>
-        </div>
-      </div>
-
-      <!-- Text Editor Panel -->
-      <div class="panel" style="margin-top:16px">
-        <div class="panel-header">
-          <h2 class="panel-title">${ICONS.tpl} 4. Текст оффера (редактор)</h2>
-          <div class="dim" style="font-size:12px" id="textStats">0 слов · 0 символов</div>
-        </div>
-        <textarea id="offerTextEditor" style="min-height:130px;font-size:14px;line-height:1.6" placeholder="Здесь появится готовый текст оффера..."></textarea>
-
-        <div class="row" style="margin-top:14px">
-          <button class="btn btn-primary" id="btnQueueOffer">${ICONS.send} В очередь цели</button>
-          <button class="btn btn-secondary" id="btnCopyOffer">${ICONS.copy} Скопировать</button>
-          <button class="btn btn-secondary" id="btnSaveAsTpl">Сохранить как шаблон</button>
-          <div class="spacer"></div>
-          <button class="btn btn-secondary btn-sm" id="btnImproveOffer" title="Автоматически устранить стоп-слова, цены и лишние вопросы">
-            ${ICONS.sparkles} Улучшить через AI
-          </button>
-        </div>
+      <div class="offer-model-pill">
+        <span class="purple">${ICONS.bot}</span>
+        <select id="selAiModel" title="Модель искусственного интеллекта">
+          <option value="qwen3.8-flash" selected>Qwen 3.8 Flash (навыки РФ)</option>
+          <option value="deepseek-v4.1-flash">DeepSeek V4.1 Flash</option>
+          <option value="glm-5.3-flash">GLM 5.3 Flash</option>
+          <option value="mimo-v2.6-flash">Mimo V2.6 Flash</option>
+        </select>
       </div>
     </div>
 
-    <!-- Right Column: AI + Jev Judge Card -->
+    <!-- Active Target Hero Card -->
+    <div class="offer-target-card" id="activeTargetCard"></div>
+
+    <!-- Strategy Horizontal Chips -->
     <div>
-      <div class="judge-card" id="judgePanel">
-        <div class="judge-header">
-          <div class="score-badge score-good" id="scoreBadge">
-            <span id="scoreNumber">--</span>
-            <small>БАЛЛОВ</small>
-          </div>
-          <div class="judge-title-area">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-              <h3 id="verdictTitle">Оценка оффера</h3>
-              <span class="judge-source-tag" id="judgeSource">JEV-RULES</span>
+      <div class="strategy-scroll-wrap" id="strategyScroll">
+        ${strategies.map(s => `
+          <button class="strategy-chip ${s.id === activeStrategyId ? 'selected' : ''}" data-strategy="${s.id}">
+            <span>${esc(s.name)}</span>
+          </button>
+        `).join("")}
+      </div>
+    </div>
+
+    <!-- Prompt Focus & Fast Config Bar -->
+    <div class="prompt-hint-bar">
+      <span class="purple" style="display:flex;align-items:center">${ICONS.sparkles}</span>
+      <input id="offerPromptHint" placeholder="Фокус: упор на аудит профиля / сайт за 3 дня / акция...">
+      <label class="prompt-hint-link-toggle" title="Добавить ссылку на портфолио в оффер">
+        <input type="checkbox" id="chkOfferWithLink">
+        <span>Ссылка</span>
+      </label>
+      <button class="btn btn-purple btn-sm" id="btnGenerateOffer" style="flex-shrink:0;height:32px;padding:0 12px">
+        ${ICONS.sparkles} <span>AI Синтез</span>
+      </button>
+    </div>
+
+    <!-- Responsive Studio Layout -->
+    <div class="studio-layout">
+      <div class="studio-main-col">
+        <!-- Candidate Variant Tabs -->
+        <div class="candidate-tabs-bar" id="candidateTabsBar">
+          <div class="dim" style="font-size:12px;padding:6px">Нажмите «AI Синтез» для запуска генерации 4 вариантов.</div>
+        </div>
+
+        <!-- Telegram-Style Chat Bubble -->
+        <div class="chat-preview-shell">
+          <div class="chat-preview-header">
+            <div class="chat-author">
+              <div class="chat-author-avatar">${ICONS.bot}</div>
+              <div>
+                <span id="chatModelName">Qwen 3.8 Flash</span>
+                <span class="dim" style="font-weight:normal"> · Копирайтер</span>
+              </div>
             </div>
-            <div class="dim" style="font-size:12.5px" id="verdictSubtitle">Введите или сгенерируйте текст оффера для анализа</div>
-            <div style="font-size:11.5px;color:var(--text-secondary);margin-top:4px" id="jevModelSummary"></div>
+            <div class="target-badge-pill" id="bubbleScorePill" style="font-size:11.5px">
+              ${ICONS.check} <span id="bubbleScoreText">--/100</span>
+            </div>
+          </div>
+
+          <div class="chat-bubble-body">
+            <textarea class="offer-textarea" id="offerTextEditor" placeholder="Здесь появится готовый текст оффера..."></textarea>
+          </div>
+
+          <div class="chat-bubble-footer">
+            <span id="textStats">0 слов · 0 символов</span>
+            <span class="dim" id="antispamRuleBadge">без спам-маркеров</span>
           </div>
         </div>
 
-        <div style="margin-bottom:18px">
-          <div style="font-weight:600;font-size:13px;margin-bottom:10px">Оценка по 4 измерениям (0-100):</div>
-
-          <div class="dimension-row">
-            <div class="dimension-labels">
-              <span>Крючок и персонализация</span>
-              <b id="scoreHook">--/25</b>
-            </div>
-            <div class="dimension-bar-track"><div class="dimension-bar-fill" id="barHook" style="width:0%"></div></div>
-          </div>
-
-          <div class="dimension-row">
-            <div class="dimension-labels">
-              <span>Ценность и оффер</span>
-              <b id="scoreValue">--/25</b>
-            </div>
-            <div class="dimension-bar-track"><div class="dimension-bar-fill" id="barValue" style="width:0%"></div></div>
-          </div>
-
-          <div class="dimension-row">
-            <div class="dimension-labels">
-              <span>Призыв к действию (CTA)</span>
-              <b id="scoreCta">--/25</b>
-            </div>
-            <div class="dimension-bar-track"><div class="dimension-bar-fill" id="barCta" style="width:0%"></div></div>
-          </div>
-
-          <div class="dimension-row">
-            <div class="dimension-labels">
-              <span>Антиспам и безопасность</span>
-              <b id="scoreAntispam">--/25</b>
-            </div>
-            <div class="dimension-bar-track"><div class="dimension-bar-fill" id="barAntispam" style="width:0%"></div></div>
+        <!-- Action Buttons Directly Below Bubble -->
+        <div class="offer-action-buttons">
+          <button class="btn btn-primary offer-action-primary" id="btnQueueOffer">
+            ${ICONS.send} Поставить в очередь отправки
+          </button>
+          <div class="offer-action-row">
+            <button class="btn btn-secondary" id="btnCopyOffer">
+              ${ICONS.copy} Копировать
+            </button>
+            <button class="btn btn-secondary" id="btnImproveOffer" title="Автоматически устранить стоп-слова, цены и лишние вопросы">
+              ${ICONS.sparkles} Humanizer
+            </button>
+            <button class="btn btn-secondary" id="btnSaveAsTpl">
+              ${ICONS.tpl} В шаблон
+            </button>
           </div>
         </div>
+      </div>
 
-        <div style="border-top:1px solid var(--border);padding-top:14px;margin-top:14px">
-          <div style="font-weight:600;font-size:13px;margin-bottom:8px">Чек-лист правил cold outreach:</div>
-          <ul class="checklist" id="checklistContainer">
-            <li class="checklist-item"><span class="dim">Ожидание текста...</span></li>
-          </ul>
+      <!-- Jev Judge Quality Panel -->
+      <div class="studio-side-col">
+        <div class="jev-judge-widget" id="judgePanel">
+          <div class="jev-widget-header">
+            <div class="jev-score-pill-large">
+              <div class="jev-score-circle score-good" id="scoreBadge">
+                <span id="scoreNumber">--</span>
+                <small>БАЛЛОВ</small>
+              </div>
+              <div class="jev-score-meta">
+                <h3 id="verdictTitle">Оценка Jev System One</h3>
+                <div class="dim" id="verdictSubtitle">Анализ вероятности отклика</div>
+                <div style="font-size:11px;color:var(--text-secondary);margin-top:2px" id="jevModelSummary"></div>
+              </div>
+            </div>
+            <span class="judge-source-tag" id="judgeSource">JEV-RULES</span>
+          </div>
+
+          <!-- 4 Dimension Micro-Bars (2x2 Grid) -->
+          <div class="dim-meters-grid">
+            <div class="dim-meter-item">
+              <div class="dim-meter-label">
+                <span>Крючок</span>
+                <b id="scoreHook">--/25</b>
+              </div>
+              <div class="dimension-bar-track"><div class="dimension-bar-fill" id="barHook" style="width:0%"></div></div>
+            </div>
+            <div class="dim-meter-item">
+              <div class="dim-meter-label">
+                <span>Ценность</span>
+                <b id="scoreValue">--/25</b>
+              </div>
+              <div class="dimension-bar-track"><div class="dimension-bar-fill" id="barValue" style="width:0%"></div></div>
+            </div>
+            <div class="dim-meter-item">
+              <div class="dim-meter-label">
+                <span>Призыв (CTA)</span>
+                <b id="scoreCta">--/25</b>
+              </div>
+              <div class="dimension-bar-track"><div class="dimension-bar-fill" id="barCta" style="width:0%"></div></div>
+            </div>
+            <div class="dim-meter-item">
+              <div class="dim-meter-label">
+                <span>Антиспам</span>
+                <b id="scoreAntispam">--/25</b>
+              </div>
+              <div class="dimension-bar-track"><div class="dimension-bar-fill" id="barAntispam" style="width:0%"></div></div>
+            </div>
+          </div>
+
+          <!-- Collapsible Checklist & Recommendations -->
+          <button class="jev-accordion-btn" id="btnToggleJevDetails">
+            <span>Чеклист cold outreach и рекомендации</span>
+            ${ICONS.chevronDown}
+          </button>
+
+          <div class="jev-accordion-body" id="jevAccordionBody">
+            <ul class="checklist" id="checklistContainer">
+              <li class="checklist-item"><span class="dim">Ожидание текста...</span></li>
+            </ul>
+            <div id="recommendationsBox"></div>
+          </div>
         </div>
-
-        <div id="recommendationsBox" style="margin-top:14px"></div>
       </div>
     </div>
   </div>`;
 
-  const selTarget = v.querySelector("#offerTargetSelect");
   const editor = v.querySelector("#offerTextEditor");
-
-  function getManualTarget() {
-    const nameEl = v.querySelector("#manualName");
-    const catEl = v.querySelector("#manualCategory");
-    const cityEl = v.querySelector("#manualCity");
-    const ratEl = v.querySelector("#manualRating");
-    const revEl = v.querySelector("#manualReviews");
-    return {
-      name: nameEl ? nameEl.value.trim() : "Клиника ДентаЛайн",
-      category: catEl ? catEl.value.trim() : "стоматология",
-      city: cityEl ? cityEl.value.trim() : "Москва",
-      rating: ratEl ? parseFloat(ratEl.value) || 4.9 : 4.9,
-      reviews: revEl ? parseInt(revEl.value) || 58 : 58,
-    };
-  }
 
   function flashEditor() {
     editor.classList.remove("flash-highlight");
@@ -2040,123 +2364,269 @@ async function viewOffers(v) {
     editor.classList.add("flash-highlight");
   }
 
-  function updateTargetDetails() {
-    const tid = +selTarget.value;
-    const t = targets.find(x => x.id === tid);
-    const box = v.querySelector("#targetDetailsCard");
-    if (!t) {
-      box.innerHTML = `
-        <div style="font-size:12.5px;color:var(--text-secondary);margin-bottom:8px">
-          <b>Ручной режим:</b> укажите параметры компании для персонализации оффера.
+  function getManualTarget() {
+    const nameEl = v.querySelector("#manualName");
+    const catEl = v.querySelector("#manualCategory");
+    const cityEl = v.querySelector("#manualCity");
+    const ratEl = v.querySelector("#manualRating");
+    const revEl = v.querySelector("#manualReviews");
+    if (nameEl) manualData.name = nameEl.value.trim();
+    if (catEl) manualData.category = catEl.value.trim();
+    if (cityEl) manualData.city = cityEl.value.trim();
+    if (ratEl) manualData.rating = parseFloat(ratEl.value) || 4.9;
+    if (revEl) manualData.reviews = parseInt(revEl.value) || 58;
+    return manualData;
+  }
+
+  // Render Target Hero Card
+  function renderTargetCard() {
+    const card = v.querySelector("#activeTargetCard");
+    if (!card) return;
+
+    if (isManualMode || !activeTargetId) {
+      card.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-size:12.5px;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:6px">
+            ${ICONS.edit} Ручной ввод параметров компании
+          </span>
+          <button class="btn btn-secondary btn-sm" id="btnSwitchToDbTargets">
+            ${ICONS.targets} Выбрать из базы (${targets.length})
+          </button>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
           <div>
-            <label style="font-size:11px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:2px">Компания:</label>
-            <input id="manualName" value="Клиника ДентаЛайн" style="width:100%;font-size:12px;padding:6px 8px">
+            <label style="font-size:11px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:2px">Компания:</label>
+            <input id="manualName" value="${esc(manualData.name)}" style="width:100%;font-size:13px;padding:6px 8px">
           </div>
           <div>
-            <label style="font-size:11px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:2px">Сфера:</label>
-            <input id="manualCategory" value="стоматология" style="width:100%;font-size:12px;padding:6px 8px">
+            <label style="font-size:11px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:2px">Сфера:</label>
+            <input id="manualCategory" value="${esc(manualData.category)}" style="width:100%;font-size:13px;padding:6px 8px">
           </div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
           <div>
-            <label style="font-size:11px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:2px">Город:</label>
-            <input id="manualCity" value="Москва" style="width:100%;font-size:12px;padding:6px 8px">
+            <label style="font-size:11px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:2px">Город:</label>
+            <input id="manualCity" value="${esc(manualData.city)}" style="width:100%;font-size:13px;padding:6px 8px">
           </div>
           <div>
-            <label style="font-size:11px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:2px">Рейтинг:</label>
-            <input id="manualRating" value="4.9" style="width:100%;font-size:12px;padding:6px 8px">
+            <label style="font-size:11px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:2px">Рейтинг:</label>
+            <input id="manualRating" value="${esc(manualData.rating)}" style="width:100%;font-size:13px;padding:6px 8px">
           </div>
           <div>
-            <label style="font-size:11px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:2px">Отзывов:</label>
-            <input id="manualReviews" value="58" style="width:100%;font-size:12px;padding:6px 8px">
+            <label style="font-size:11px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:2px">Отзывов:</label>
+            <input id="manualReviews" value="${esc(manualData.reviews)}" style="width:100%;font-size:13px;padding:6px 8px">
           </div>
         </div>
       `;
+      const btnDb = card.querySelector("#btnSwitchToDbTargets");
+      if (btnDb) {
+        btnDb.onclick = () => showTargetPicker();
+      }
       return;
     }
-    box.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-        <b style="color:var(--text-primary);font-size:13px">${esc(t.name)}</b>
-        <span class="mono ok">${t.username ? '@' + esc(t.username) : 'нет telegram'}</span>
+
+    const t = targets.find(x => x.id === activeTargetId);
+    if (!t) {
+      isManualMode = true;
+      renderTargetCard();
+      return;
+    }
+
+    card.innerHTML = `
+      <div class="target-card-row">
+        <div class="target-card-info">
+          <div class="target-card-title-row">
+            <span class="target-card-name" title="${esc(t.name)}">${esc(t.name)}</span>
+            ${t.username ? `<span class="target-badge-pill tg-ok">@${esc(t.username)}</span>` : '<span class="target-badge-pill">без tg</span>'}
+            ${t.rating > 0 ? `<span class="target-badge-pill star-pill">${ICONS.star} ${t.rating}</span>` : ''}
+          </div>
+          <div class="target-card-meta">
+            <span>${esc(t.category || "Сфера не указ.")}</span>
+            <span>·</span>
+            <span>${esc(t.city || "Город не указ.")}</span>
+            ${t.reviews ? `<span>· ${num(t.reviews)} отз.</span>` : ''}
+          </div>
+        </div>
+        <div class="target-card-actions">
+          <button class="btn btn-secondary btn-sm" id="btnChangeTarget" title="Выбрать другую цель">
+            ${ICONS.refresh} <span>Сменить</span>
+          </button>
+        </div>
       </div>
-      <div>Сфера: <b>${esc(t.category) || 'не указана'}</b> · Город: <b>${esc(t.city) || 'не указан'}</b></div>
-      <div>Репутация: <b>${t.rating > 0 ? t.rating + ' на картах' : 'нет рейтинга'}</b> · ${t.reviews ? num(t.reviews) + ' отзывов' : 'нет отзывов'}</div>
     `;
-  }
-  selTarget.onchange = () => { updateTargetDetails(); };
-  updateTargetDetails();
 
-  // Seed demo button
-  const btnSeed = v.querySelector("#btnSeedDemoOffers");
-  if (btnSeed) {
-    btnSeed.onclick = async () => {
-      btnSeed.disabled = true;
-      try {
-        await api.send("/api/targets/seed_demo", {});
-        toast("5 демо-целей успешно добавлены!");
-        route();
-      } catch (err) {
-        toast(err.message, "error");
-      } finally {
-        btnSeed.disabled = false;
+    const btnChange = card.querySelector("#btnChangeTarget");
+    if (btnChange) {
+      btnChange.onclick = () => showTargetPicker();
+    }
+  }
+
+  // Target Picker Modal with Real-time Filter
+  function showTargetPicker() {
+    let filterQuery = "";
+
+    function renderPickerList() {
+      const container = document.getElementById("targetPickerList");
+      if (!container) return;
+      const q = filterQuery.toLowerCase().trim();
+      const filtered = targets.filter(t => {
+        if (!q) return true;
+        return (t.name && t.name.toLowerCase().includes(q)) ||
+               (t.category && t.category.toLowerCase().includes(q)) ||
+               (t.city && t.city.toLowerCase().includes(q)) ||
+               (t.username && t.username.toLowerCase().includes(q));
+      });
+
+      if (!filtered.length) {
+        container.innerHTML = `<div class="dim" style="padding:16px;text-align:center">Компании не найдены по запросу «${esc(q)}»</div>`;
+        return;
       }
-    };
+
+      container.innerHTML = filtered.slice(0, 100).map(t => `
+        <button class="target-picker-item ${t.id === activeTargetId ? 'selected' : ''}" data-target-id="${t.id}">
+          <div style="min-width:0;flex:1">
+            <div style="font-weight:600;font-size:13.5px;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+              ${esc(t.name)}
+            </div>
+            <div style="font-size:11.5px;color:var(--text-secondary);margin-top:2px">
+              ${esc(t.category || "без сферы")} · ${esc(t.city || "город не указ.")}
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+            ${t.rating > 0 ? `<span class="target-badge-pill star-pill">${ICONS.star} ${t.rating}</span>` : ''}
+            ${t.username ? `<span class="target-badge-pill tg-ok">@${esc(t.username)}</span>` : '<span class="target-badge-pill">без tg</span>'}
+          </div>
+        </button>
+      `).join("");
+
+      container.querySelectorAll(".target-picker-item").forEach(item => {
+        item.onclick = () => {
+          activeTargetId = +item.dataset.targetId;
+          isManualMode = false;
+          closeModal();
+          renderTargetCard();
+          doGenerate();
+        };
+      });
+    }
+
+    const modalBody = `
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;gap:8px">
+          <input id="targetPickerFilter" placeholder="Поиск компании, сферы или города..." style="flex:1" autofocus>
+          <button class="btn btn-secondary btn-sm" id="btnManualModeInPicker">Ручной ввод</button>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span class="dim" style="font-size:12px">Всего в базе: ${targets.length} компаний</span>
+          <button class="btn btn-secondary btn-sm" id="btnSeedDemoInPicker">${ICONS.sparkles} +5 демо-целей</button>
+        </div>
+        <div class="target-picker-list" id="targetPickerList"></div>
+      </div>
+    `;
+
+    modal("Выбор компании для оффера", modalBody);
+    renderPickerList();
+
+    const filterInput = document.getElementById("targetPickerFilter");
+    if (filterInput) {
+      filterInput.oninput = () => {
+        filterQuery = filterInput.value;
+        renderPickerList();
+      };
+    }
+
+    const btnManual = document.getElementById("btnManualModeInPicker");
+    if (btnManual) {
+      btnManual.onclick = () => {
+        isManualMode = true;
+        activeTargetId = null;
+        closeModal();
+        renderTargetCard();
+      };
+    }
+
+    const btnSeed = document.getElementById("btnSeedDemoInPicker");
+    if (btnSeed) {
+      btnSeed.onclick = async () => {
+        btnSeed.disabled = true;
+        try {
+          await api.send("/api/targets/seed_demo", {});
+          toast("5 демо-целей добавлены в базу");
+          closeModal();
+          route();
+        } catch (err) {
+          toast(err.message, "error");
+        } finally {
+          btnSeed.disabled = false;
+        }
+      };
+    }
   }
 
-  // Refresh targets button
-  v.querySelector("#btnRefreshTargets").onclick = () => { route(); };
-
-  // Strategy Selection
-  v.querySelectorAll(".strategy-card").forEach(c => {
-    c.onclick = () => {
-      v.querySelectorAll(".strategy-card").forEach(x => x.classList.remove("selected"));
-      c.classList.add("selected");
-      activeStrategyId = c.dataset.strategy;
-      v.querySelector("#btnGenerateOffer").click();
+  // Strategy Scroll Selection
+  v.querySelectorAll(".strategy-chip").forEach(chip => {
+    chip.onclick = () => {
+      v.querySelectorAll(".strategy-chip").forEach(x => x.classList.remove("selected"));
+      chip.classList.add("selected");
+      activeStrategyId = chip.dataset.strategy;
+      doGenerate();
     };
   });
 
-  // Render Candidates List
+  // AI Model Change
+  const selAiModel = v.querySelector("#selAiModel");
+  if (selAiModel) {
+    selAiModel.onchange = () => {
+      const chatModelName = v.querySelector("#chatModelName");
+      if (chatModelName) {
+        const optText = selAiModel.options[selAiModel.selectedIndex].text;
+        chatModelName.textContent = optText.split(" ")[0] + " " + optText.split(" ")[1];
+      }
+      doGenerate();
+    };
+  }
+
+  // Render Candidate Tabs
   function renderCandidates(candidates, currentStrategyId, manualTarget) {
-    const list = v.querySelector("#candidatesList");
+    currentCandidates = candidates || [];
+    const list = v.querySelector("#candidateTabsBar");
     if (!list) return;
     if (!candidates || !candidates.length) {
-      list.innerHTML = `<div class="dim" style="font-size:12px;padding:8px">Нажмите «Сгенерировать и отобрать через Jev» для запуска анализа.</div>`;
+      list.innerHTML = `<div class="dim" style="font-size:12px;padding:6px">Нажмите «AI Синтез» для запуска генерации 4 вариантов.</div>`;
       return;
     }
+
     list.innerHTML = candidates.map(c => `
-      <div class="candidate-card ${c.id === currentStrategyId ? 'active' : ''}" data-cand-id="${c.id}">
-        <div class="candidate-head">
-          <span class="candidate-title">${esc(c.title)}</span>
-          <span class="candidate-badge ${c.is_winner ? 'winner' : 'alt'}">
-            ${c.is_winner ? ICONS.check + ' Выбор Jev (' + c.probability + '%)' : c.probability + '% вер-ть'}
+      <button class="candidate-tab-pill ${c.id === currentStrategyId ? 'active' : ''}" data-cand-id="${c.id}">
+        <div class="candidate-tab-header">
+          <span class="candidate-tab-name">${esc(c.title)}</span>
+          <span class="candidate-tab-score ${c.is_winner ? 'winner' : 'alt'}">
+            ${c.is_winner ? ICONS.check + ' ' + c.probability + '%' : c.probability + '%'}
           </span>
         </div>
-        <div class="candidate-text-preview">${esc(c.text)}</div>
-      </div>
+        <div class="candidate-tab-snippet">${esc(c.text)}</div>
+      </button>
     `).join("");
 
-    list.querySelectorAll(".candidate-card").forEach(card => {
-      card.onclick = async () => {
-        const cid = card.dataset.candId;
+    list.querySelectorAll(".candidate-tab-pill").forEach(tab => {
+      tab.onclick = async () => {
+        const cid = tab.dataset.candId;
         const cand = candidates.find(x => x.id === cid);
         if (!cand) return;
-        list.querySelectorAll(".candidate-card").forEach(x => x.classList.remove("active"));
-        card.classList.add("active");
+        list.querySelectorAll(".candidate-tab-pill").forEach(x => x.classList.remove("active"));
+        tab.classList.add("active");
         editor.value = cand.text;
         flashEditor();
         updateTextStats();
 
-        // Re-classify for newly selected candidate
-        const tid = selTarget.value ? +selTarget.value : null;
+        const tid = !isManualMode ? activeTargetId : null;
+        const targetObj = isManualMode ? getManualTarget() : null;
         const wl = v.querySelector("#chkOfferWithLink").checked;
         try {
           const res = await api.send("/api/offer/classify", {
             text: cand.text,
             target_id: tid,
-            target: !tid ? manualTarget : null,
+            target: targetObj,
             with_link: wl
           });
           updateJudge(res);
@@ -2167,18 +2637,20 @@ async function viewOffers(v) {
 
   // Generate Action
   async function doGenerate() {
-    const tid = selTarget.value ? +selTarget.value : null;
-    const manualTarget = !tid ? getManualTarget() : null;
-    const model = (v.querySelector("#selAiModel") ? v.querySelector("#selAiModel").value : "qwen3.8-flash");
+    const tid = !isManualMode ? activeTargetId : null;
+    const targetObj = isManualMode ? getManualTarget() : null;
+    const model = (selAiModel ? selAiModel.value : "qwen3.8-flash");
+    const promptHint = (v.querySelector("#offerPromptHint") ? v.querySelector("#offerPromptHint").value : "");
+    const wl = v.querySelector("#chkOfferWithLink").checked;
     const btn = v.querySelector("#btnGenerateOffer");
     const origHtml = btn.innerHTML;
     btn.disabled = true;
-    btn.innerHTML = `<span class="spin">${ICONS.sparkles}</span> ${model.split("-")[0]} генерирует...`;
+    btn.innerHTML = `<span class="spin">${ICONS.sparkles}</span> <span>Синтез...</span>`;
 
     try {
       const res = await api.send("/api/offer/generate", {
         target_id: tid,
-        target: manualTarget,
+        target: targetObj,
         strategy_id: activeStrategyId,
         prompt_hint: promptHint,
         model: model,
@@ -2187,7 +2659,7 @@ async function viewOffers(v) {
 
       editor.value = res.text;
       flashEditor();
-      renderCandidates(res.candidates, res.strategy, manualTarget);
+      renderCandidates(res.candidates, res.strategy, targetObj);
       updateJudge(res.classification);
       updateTextStats();
       toast("B.AI + Jev: 4 варианта синтезированы, выбран сильнейший!");
@@ -2209,13 +2681,13 @@ async function viewOffers(v) {
       const text = editor.value.trim();
       if (!text) return;
       try {
-        const tid = selTarget.value ? +selTarget.value : null;
-        const manualTarget = !tid ? getManualTarget() : null;
+        const tid = !isManualMode ? activeTargetId : null;
+        const targetObj = isManualMode ? getManualTarget() : null;
         const wl = v.querySelector("#chkOfferWithLink").checked;
         const res = await api.send("/api/offer/classify", {
           text,
           target_id: tid,
-          target: manualTarget,
+          target: targetObj,
           with_link: wl
         });
         updateJudge(res);
@@ -2227,7 +2699,12 @@ async function viewOffers(v) {
     const text = editor.value;
     const words = text ? text.trim().split(/\s+/).length : 0;
     const chars = text.length;
+    const hasQuestion = (text.match(/\?/g) || []).length === 1;
     v.querySelector("#textStats").textContent = `${words} слов · ${chars} символов`;
+    const spamBadge = v.querySelector("#antispamRuleBadge");
+    if (spamBadge) {
+      spamBadge.textContent = hasQuestion ? "1 легкий вопрос · антиспам ок" : (words > 50 ? "превышен лимит слов" : "без спам-маркеров");
+    }
   }
 
   function updateJudge(res) {
@@ -2238,17 +2715,25 @@ async function viewOffers(v) {
     const subEl = v.querySelector("#verdictSubtitle");
     const srcEl = v.querySelector("#judgeSource");
     const summaryEl = v.querySelector("#jevModelSummary");
+    const bubbleScore = v.querySelector("#bubbleScoreText");
+    const bubblePill = v.querySelector("#bubbleScorePill");
 
     numEl.textContent = res.score;
-    badge.className = `score-badge score-${res.verdict}`;
+    badge.className = `jev-score-circle score-${res.verdict}`;
     titleEl.textContent = res.verdict_title;
     subEl.textContent = res.status_label;
     srcEl.textContent = res.source === "jev_ai" ? "JEV AI" : "JEV RULES";
     if (summaryEl) {
       summaryEl.textContent = res.ai_summary || "";
     }
+    if (bubbleScore) {
+      bubbleScore.textContent = `${res.score}/100`;
+    }
+    if (bubblePill) {
+      bubblePill.className = `target-badge-pill score-${res.verdict}`;
+    }
 
-    // Update Dimensions
+    // Update Dimension Micro-Bars
     const d = res.dimensions;
     v.querySelector("#scoreHook").textContent = `${d.hook.score}/${d.hook.max}`;
     v.querySelector("#barHook").style.width = `${(d.hook.score / d.hook.max) * 100}%`;
@@ -2286,7 +2771,7 @@ async function viewOffers(v) {
     const recBox = v.querySelector("#recommendationsBox");
     if (res.recommendations && res.recommendations.length) {
       recBox.innerHTML = `
-        <div class="callout callout-warn" style="padding:10px 14px;margin:0;font-size:12.5px">
+        <div class="callout callout-warn" style="padding:10px 12px;margin:0;font-size:12px">
           ${ICONS.alert}
           <div>
             <b>Рекомендации Jev по доработке:</b>
@@ -2298,7 +2783,7 @@ async function viewOffers(v) {
       `;
     } else {
       recBox.innerHTML = `
-        <div class="callout callout-ok" style="padding:10px 14px;margin:0;font-size:12.5px">
+        <div class="callout callout-ok" style="padding:10px 12px;margin:0;font-size:12px">
           ${ICONS.check}
           <div><b>Оффер идеален!</b> Все критерии cold outreach соблюдены на максимум.</div>
         </div>
@@ -2306,18 +2791,29 @@ async function viewOffers(v) {
     }
   }
 
-  // Copy & Queue
+  // Toggle Jev Checklist Accordion
+  const btnToggle = v.querySelector("#btnToggleJevDetails");
+  const accordionBody = v.querySelector("#jevAccordionBody");
+  if (btnToggle && accordionBody) {
+    btnToggle.onclick = () => {
+      btnToggle.classList.toggle("open");
+      accordionBody.classList.toggle("open");
+    };
+  }
+
+  // Copy Action
   v.querySelector("#btnCopyOffer").onclick = async () => {
     await navigator.clipboard.writeText(editor.value);
     toast("Оффер скопирован в буфер");
   };
 
+  // Queue Action
   v.querySelector("#btnQueueOffer").onclick = async () => {
     const text = editor.value.trim();
     if (!text) { alert("Текст оффера пуст"); return; }
-    const tid = selTarget.value ? +selTarget.value : null;
+    const tid = !isManualMode ? activeTargetId : null;
     if (!tid) {
-      alert("Выберите цель из базы, чтобы поставить оффер в очередь");
+      alert("Выберите компанию из базы, чтобы поставить оффер в очередь");
       return;
     }
     try {
@@ -2326,6 +2822,7 @@ async function viewOffers(v) {
     } catch (e) { alert(e.message); }
   };
 
+  // Save as Template Action
   v.querySelector("#btnSaveAsTpl").onclick = async () => {
     const text = editor.value.trim();
     if (!text) return;
@@ -2335,21 +2832,22 @@ async function viewOffers(v) {
     toast("Шаблон успешно сохранен!");
   };
 
+  // Humanizer Action
   v.querySelector("#btnImproveOffer").onclick = async () => {
     const text = editor.value.trim();
     if (!text) return;
-    const tid = selTarget.value ? +selTarget.value : null;
-    const manualTarget = !tid ? getManualTarget() : null;
-    const model = (v.querySelector("#selAiModel") ? v.querySelector("#selAiModel").value : "qwen3.8-flash");
+    const tid = !isManualMode ? activeTargetId : null;
+    const targetObj = isManualMode ? getManualTarget() : null;
+    const model = (selAiModel ? selAiModel.value : "qwen3.8-flash");
     const btn = v.querySelector("#btnImproveOffer");
     const origHtml = btn.innerHTML;
     btn.disabled = true;
-    btn.innerHTML = `<span class="spin">${ICONS.sparkles}</span> Humanizer (${model.split("-")[0]})...`;
+    btn.innerHTML = `<span class="spin">${ICONS.sparkles}</span> Humanizer...`;
     try {
       const r = await api.send("/api/offer/improve", {
         text,
         target_id: tid,
-        target: manualTarget,
+        target: targetObj,
         model: model,
         with_link: v.querySelector("#chkOfferWithLink").checked
       });
@@ -2366,7 +2864,8 @@ async function viewOffers(v) {
     }
   };
 
-  // Generate on initial load
+  // Initial render
+  renderTargetCard();
   doGenerate();
 }
 

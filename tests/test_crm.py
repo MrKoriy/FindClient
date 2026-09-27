@@ -422,7 +422,7 @@ def test_classify_penalizes_price_and_long_dash():
     from crm import offer
 
     bad_text = (
-        "Здравствуйте! Предлагаем сайт за 45000 руб. со скидкой - сделаем быстро. "
+        "Здравствуйте! Предлагаем сайт за 45000 руб. со скидкой \u2014 сделаем быстро. "
         "Интересно? Или перезвонить позже?"
     )
     res = offer.classify_offer(bad_text)
