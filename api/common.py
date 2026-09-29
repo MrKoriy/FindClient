@@ -132,3 +132,77 @@ def lead_score(*, has_website: bool, phone: str, reviews: int, branches: int, ra
     elif rating >= 4.0:
         score += 5
     return min(100, score)
+
+
+# ---------------------------------------------------------------- site-check
+
+_PARKING_MARKERS = (
+    "домен продается",
+    "домен продаётся",
+    "parking",
+    "заглушка",
+    "скоро открытие",
+    "coming soon",
+    "domain for sale",
+)
+
+
+async def check_site_alive(url: str, session) -> bool:
+    """HEAD/GET -> жив ли сайт. Парковка/заглушка считается мёртвой.
+
+    Неблокирующая: любой сбой = False (лучше пропустить проверку, чем упасть).
+    """
+    if not url or not (url := url.strip()):
+        return False
+    if "://" not in url:
+        url = "https://" + url
+    try:
+        async with session.head(url, allow_redirects=True, timeout=10) as r:
+            if r.status >= 400:
+                return False
+            # 2xx/3xx -> пробуем быстро глянуть на парковку через GET title
+            if r.status < 400:
+                try:
+                    async with session.get(url, allow_redirects=True, timeout=10) as rg:
+                        if rg.status >= 400:
+                            return False
+                        ct = (rg.headers.get("Content-Type") or "").lower()
+                        if "text/html" not in ct and ct:
+                            return True
+                        text = await rg.text(errors="ignore")
+                        low = text.lower()
+                        # ищем маркеры парковки в первых 5кб
+                        snippet = low[:5000]
+                        if any(m in snippet for m in _PARKING_MARKERS):
+                            return False
+                        return True
+                except Exception:
+                    # HEAD прошёл — считаем живым
+                    return True
+            return True
+    except Exception:
+        return False
+
+
+async def enrich_site_check(orgs, session, sem: int = 10) -> dict[str, bool]:
+    """Проверить `website` у списка orgs. Возвращает {url: alive}.
+
+    Не меняет orgs in-place — только возвращает карту. Вызывать опционально
+    в scrape_service после merge.
+    """
+    import asyncio as _asyncio
+
+    semaphore = _asyncio.Semaphore(sem)
+    out: dict[str, bool] = {}
+
+    async def one(url: str) -> None:
+        async with semaphore:
+            out[url] = await check_site_alive(url, session)
+
+    urls = [o.website for o in orgs if getattr(o, "website", "").strip()]
+    # dedup
+    uniq = list(dict.fromkeys(urls))
+    if not uniq:
+        return {}
+    await _asyncio.gather(*(one(u) for u in uniq))
+    return out

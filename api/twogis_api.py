@@ -377,17 +377,9 @@ class TwoGISApi:
         skip_ids = skip_ids or set()
         result: list[Organization] = []
         seen: set[str] = set()
-        total = None
-        for page in range(1, max_pages + 1):
-            data = await self._call("/3.0/items", {**params, "page": page})
-            code = (data.get("meta") or {}).get("code")
-            if code == 404:
-                break  # past the last page
-            res = data.get("result") or {}
-            items = res.get("items") or []
-            total = res.get("total", total)
-            if not items:
-                break
+        total: int | None = None
+
+        def _ingest(items: list[dict[str, Any]]) -> None:
             for item in items:
                 org = parse_item(item, city_name, slug)
                 if not org or org.id in seen or org.id in skip_ids:
@@ -396,10 +388,62 @@ class TwoGISApi:
                 if only_without_site and org.has_website:
                     continue
                 result.append(org)
+
+        # Page 1 — узнаём total, чтобы ограничить батчи
+        data = await self._call("/3.0/items", {**params, "page": 1})
+        code = (data.get("meta") or {}).get("code")
+        first_items: list[dict[str, Any]] = []
+        if code != 404:
+            res = data.get("result") or {}
+            first_items = res.get("items") or []
+            total = res.get("total", total)
+            if first_items:
+                _ingest(first_items)
+                if on_progress:
+                    await on_progress(min(len(result), count), count)
+        if len(result) >= count or (total is not None and 1 * _PAGE_SIZE >= total) or code == 404 or not first_items:
+            return result[:count]
+
+        # Остальные страницы — батчами по 5 параллельно
+        sem = asyncio.Semaphore(5)
+        page = 2
+        while len(result) < count and page <= max_pages:
+            if total is not None and (page - 1) * _PAGE_SIZE >= total:
+                break
+            batch_end = min(page + 5, max_pages + 1)
+            if total is not None:
+                max_page = (total + _PAGE_SIZE - 1) // _PAGE_SIZE
+                batch_end = min(batch_end, max_page + 1)
+            batch = range(page, batch_end)
+            if not batch:
+                break
+
+            async def _fetch(p: int) -> tuple[int, dict[str, Any]]:
+                async with sem:
+                    d = await self._call("/3.0/items", {**params, "page": p})
+                    return p, d
+
+            pages_data = await asyncio.gather(*(_fetch(p) for p in batch))
+            pages_data = sorted(pages_data, key=lambda x: x[0])  # type: ignore[arg-type]
+            hit_404 = False
+            for _, pdata in pages_data:
+                pcode = (pdata.get("meta") or {}).get("code")
+                if pcode == 404:
+                    hit_404 = True
+                    break
+                pres = pdata.get("result") or {}
+                pitems = pres.get("items") or []
+                if pres.get("total") is not None:
+                    total = pres["total"]
+                if not pitems:
+                    # пустая страница — дальше нет смысла, но проверяем остальные страницы батча
+                    continue
+                _ingest(pitems)
             if on_progress:
                 await on_progress(min(len(result), count), count)
-            if len(result) >= count or (total and page * _PAGE_SIZE >= total):
+            if hit_404 or len(result) >= count or (total is not None and (batch_end - 1) * _PAGE_SIZE >= total):
                 break
+            page = batch_end
             if self.request_delay:
                 await asyncio.sleep(self.request_delay * random.uniform(0.7, 1.4))
         return result[:count]

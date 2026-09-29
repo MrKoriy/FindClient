@@ -34,6 +34,42 @@ _PAGE = 25
 _MAX_SKIP = 900  # the web API returns 500 past ~1000
 
 
+def _split_bbox(ll: str, spn: str, parts: int = 4) -> list[tuple[str, str]]:
+    """Разбить bbox на квадранты.
+
+    ll="lon,lat" (центр), spn="dLon,dLat" (размер). parts=4 -> 2x2,
+    parts=2 -> север/юг (fallback когда bbox узкий).
+    Возвращает список (ll_i, spn_i) для каждого квадранта.
+    """
+    try:
+        lon, lat = map(float, ll.split(","))
+        dlon, dlat = map(float, spn.split(","))
+    except Exception:
+        return [(ll, spn)]
+    if parts == 2:
+        # north / south split
+        hlat = dlat / 2
+        q_lat = dlat / 4
+        return [
+            (f"{lon:.6f},{lat + q_lat:.6f}", f"{dlon:.6f},{hlat:.6f}"),
+            (f"{lon:.6f},{lat - q_lat:.6f}", f"{dlon:.6f},{hlat:.6f}"),
+        ]
+    # parts == 4 default -> 2x2
+    hlon, hlat = dlon / 2, dlat / 2
+    q_lon, q_lat = dlon / 4, dlat / 4
+    return [
+        (f"{lon - q_lon:.6f},{lat + q_lat:.6f}", f"{hlon:.6f},{hlat:.6f}"),  # NW
+        (f"{lon + q_lon:.6f},{lat + q_lat:.6f}", f"{hlon:.6f},{hlat:.6f}"),  # NE
+        (f"{lon - q_lon:.6f},{lat - q_lat:.6f}", f"{hlon:.6f},{hlat:.6f}"),  # SW
+        (f"{lon + q_lon:.6f},{lat - q_lat:.6f}", f"{hlon:.6f},{hlat:.6f}"),  # SE
+    ]
+
+
+# alias для совместимости с ТЗ (оба имени работают)
+def _bbox_quadrants(ll: str, spn: str) -> list[tuple[str, str]]:
+    return _split_bbox(ll, spn, parts=4)
+
+
 class YandexError(RuntimeError):
     pass
 
@@ -123,11 +159,23 @@ class YandexMapsClient:
         api_key: str = "",
         request_delay: float = 2.0,
         proxy: str = "",
+        proxy_pool: list[str] | None = None,
+        bbox_split: bool = True,
     ) -> None:
         self.session = session
         self.api_key = api_key
         self.request_delay = request_delay
         self.proxy = proxy or None
+        self.proxy_pool = [p for p in (proxy_pool or []) if p]
+        self.bbox_split = bbox_split
+        self._proxy_idx = 0
+
+    def _next_proxy(self) -> str | None:
+        if self.proxy_pool:
+            p = self.proxy_pool[self._proxy_idx % len(self.proxy_pool)]
+            self._proxy_idx += 1
+            return p
+        return self.proxy
 
     async def search(
         self,
@@ -162,7 +210,139 @@ class YandexMapsClient:
                 await on_progress(min(len(result), count), count)
             if len(result) >= count:
                 break
+        # bbox 2x2: если не набрали count и bbox_split включён — добираем квадрантами
+        if self.bbox_split and len(result) < count and CurlSession is not None and not self.api_key:
+            more = await self._bbox_extra(text, city, count - len(result), seen | skip_ids)
+            for org in more:
+                if org.id in seen or org.id in skip_ids:
+                    continue
+                seen.add(org.id)
+                if only_without_site and org.has_website:
+                    continue
+                result.append(org)
+                if len(result) >= count:
+                    break
         return result[:count]
+
+    async def _bbox_extra(
+        self, text: str, city: str, need: int, skip_ids: set[str]
+    ) -> list[Organization]:
+        """Добрать результаты разбивкой исходного bbox на квадранты 2x2.
+
+        Берёт исходные ll/spn из записи карты, разбивает на 4 квадранта
+        (новый ll_i + половинный spn_i) и пагинирует каждый.
+        Дедуплицирует по id; ротирует proxy на каждый квадрант если задан pool.
+        При ошибке квадранта (капча/сеть) пропускает его.
+        """
+        if need <= 0 or CurlSession is None:
+            return []
+        # получить исходный bbox из первичной страницы (дешёвый повторный GET)
+        orig_ll, orig_spn, token, session_id, base, referer = await self._fetch_bbox_meta(text)
+        if not (orig_ll and orig_spn and token):
+            return []
+        quadrants = _split_bbox(orig_ll, orig_spn, parts=4)
+        out: list[Organization] = []
+        seen: set[str] = set(skip_ids)
+        for q_ll, q_spn in quadrants:
+            if len(out) >= need:
+                break
+            proxy = self._next_proxy()
+            try:
+                async for batch in self._paginate_curl(
+                    text, city, q_ll, q_spn, token, session_id, base, referer, proxy=proxy
+                ):
+                    for org in batch:
+                        if org.id in seen:
+                            continue
+                        seen.add(org.id)
+                        out.append(org)
+                        if len(out) >= need:
+                            break
+                    if len(out) >= need:
+                        break
+            except Exception as exc:
+                log.warning("Yandex bbox quadrant %s failed: %s", q_ll, exc)
+                continue
+        if out:
+            log.info("Yandex bbox 2x2: +%d extra (need=%d)", len(out), need)
+        return out
+
+    async def _fetch_bbox_meta(
+        self, text: str
+    ) -> tuple[str, str, str, str, str, str]:
+        """GET /maps/?text= — достать ll/spn/token для разбивки. Возвращает (ll, spn, token, sid, base, referer)."""
+        proxy = self._next_proxy()
+        async with CurlSession(impersonate="chrome", proxy=proxy, timeout=30) as s:
+            headers = {"Accept-Language": "ru-RU,ru;q=0.9"}
+            r = await s.get("https://yandex.ru/maps/?text=" + quote(text), headers=headers)
+            if "showcaptcha" in str(r.url):
+                return "", "", "", "", "", ""
+            try:
+                state = self._parse_state(r.text)
+            except YandexError:
+                return "", "", "", "", "", ""
+            results = (state.get("stack") or [{}])[0].get("results") or {}
+            cfg = state.get("config") or {}
+            token = cfg.get("csrfToken", "")
+            session_id = ((cfg.get("counters") or {}).get("analytics") or {}).get("sessionId", "")
+            bounds = results.get("requestBounds") or (cfg.get("mapRegion") or {}).get("bounds")
+            if not bounds:
+                return "", "", token, session_id, "", str(r.url)
+            (x1, y1), (x2, y2) = bounds
+            ll = f"{(x1 + x2) / 2:.6f},{(y1 + y2) / 2:.6f}"
+            spn = f"{abs(x2 - x1):.6f},{abs(y2 - y1):.6f}"
+            parts = urlsplit(str(r.url))
+            base = f"{parts.scheme}://{parts.netloc}"
+            return ll, spn, token, session_id, base, str(r.url)
+
+    async def _paginate_curl(
+        self,
+        text: str,
+        city: str,
+        ll: str,
+        spn: str,
+        token: str,
+        session_id: str,
+        base: str,
+        referer: str,
+        proxy: str | None = None,
+    ):
+        """Пагинация одного квадранта: skip 0..900, yield batches. Proxy per-quadrant уже выбран."""
+        if not (token and base):
+            return
+        eff_proxy = proxy if proxy is not None else self._next_proxy()
+        async with CurlSession(impersonate="chrome", proxy=eff_proxy, timeout=30) as s:
+            headers = {"Accept-Language": "ru-RU,ru;q=0.9"}
+            for skip in range(0, _MAX_SKIP, _PAGE):
+                await asyncio.sleep(self.request_delay * random.uniform(0.8, 1.3))
+                data = None
+                cur_token = token
+                for _ in range(3):
+                    params = {
+                        "ajax": "1", "csrfToken": cur_token, "sessionId": session_id,
+                        "text": text, "lang": "ru_RU", "results": str(_PAGE),
+                        "skip": str(skip), "ll": ll, "spn": spn, "origin": "maps-pager",
+                    }
+                    qs = _qs(params)
+                    resp = await s.get(
+                        f"{base}/maps/api/search?{qs}&s={_web_sig(qs)}",
+                        headers={**headers, "Accept": "*/*", "Referer": referer, "X-Retpath-Y": referer},
+                    )
+                    try:
+                        payload = resp.json()
+                    except ValueError:
+                        payload = {}
+                    if set(payload) == {"csrfToken"}:
+                        cur_token = payload["csrfToken"]
+                        continue
+                    data = payload
+                    break
+                if not data or data.get("type") == "captcha":
+                    return
+                items = (data.get("data") or {}).get("items") or []
+                if not items:
+                    return
+                yield [o for o in (parse_web_item(i, city) for i in items) if o]
 
     # ------------------------------------------------------------------
     # Official API
@@ -206,7 +386,7 @@ class YandexMapsClient:
         yield [o for o in (parse_web_item(i, city) for i in items) if o]
 
     async def _web_pages_curl(self, text: str, city: str):
-        async with CurlSession(impersonate="chrome", proxy=self.proxy, timeout=30) as s:
+        async with CurlSession(impersonate="chrome", proxy=self._next_proxy(), timeout=30) as s:
             headers = {"Accept-Language": "ru-RU,ru;q=0.9"}
             r = await s.get("https://yandex.ru/maps/?text=" + quote(text), headers=headers)
             if "showcaptcha" in str(r.url):

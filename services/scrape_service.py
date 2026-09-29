@@ -41,6 +41,7 @@ class ScrapeRequest:
     only_with_phone: bool = False
     # ФИО руководителя из ЕГРЮЛ: +1-2 запроса на компанию, поэтому опция.
     enrich_egrul: bool = False
+    check_site: bool = False  # HEAD+GET проверка website на парковку/заглушку
     label: str = ""  # history key; defaults to the first query
 
     @property
@@ -162,12 +163,16 @@ class ScrapeService:
         request_delay: float = 0.3,
         yandex_api_key: str = "",
         proxy: str = "",
+        proxy_pool: list[str] | None = None,
+        bbox_split: bool = True,
         searchers: dict[str, Searcher] | None = None,
     ) -> None:
         self.db = db
         self.request_delay = request_delay
         self.yandex_api_key = yandex_api_key
         self.proxy = proxy
+        self.proxy_pool = proxy_pool or []
+        self.bbox_split = bbox_split
         # Ключи 2GIS лежат рядом с базой: рестарт сохраняет рабочий ключ.
         self.creds_path = Path(db.path).parent / "twogis_creds.json"
         self.searchers = searchers or {"2gis": self._search_2gis, "yandex": self._search_yandex}
@@ -213,7 +218,10 @@ class ScrapeService:
             await api.close()
 
     async def _search_yandex(self, session, query, req, need, skip, progress) -> list[Organization]:
-        client = YandexMapsClient(session, api_key=self.yandex_api_key, proxy=self.proxy)
+        client = YandexMapsClient(
+            session, api_key=self.yandex_api_key, proxy=self.proxy,
+            proxy_pool=self.proxy_pool, bbox_split=self.bbox_split,
+        )
 
         async def on_page(done: int, total: int) -> None:
             await progress(f"Яндекс «{query}»: {done}/{total}")
@@ -234,22 +242,30 @@ class ScrapeService:
         errors: list[str] = []
 
         async def collect(source: str) -> tuple[list[Organization], str | None]:
-            """Один источник: все запросы по очереди, исключение не роняет остальные."""
+            """Один источник: все запросы параллельно, исключение одного не роняет остальные."""
             search = self.searchers.get(source)
             if not search:
                 return [], None
-            got: list[Organization] = []
-            for query in req.queries:
-                need = req.count - len(got)
-                if need <= 0:
-                    break
-                skip = known | {o.id for o in got}
+            # Параллельно: каждый query ищет overshoot=count (без меж-запросного дедупа).
+            # Дубликаты схлопнет merge_organizations + обрезка до count — быстрее
+            # чем последовательно с need=count-len(got) и skip_ids между queries.
+            async def one_query(query: str) -> tuple[list[Organization], str | None]:
                 try:
-                    got += await search(session, query, req, need, skip, progress)
+                    orgs = await search(session, query, req, req.count, known, progress)
+                    return orgs, None
                 except Exception as exc:
-                    log.exception("%s search failed", source)
-                    return got, f"{SOURCE_LABELS.get(source, source)}: {exc}"
-            return got, None
+                    log.exception("%s search failed (query=%s)", source, query)
+                    return [], f"{SOURCE_LABELS.get(source, source)} ({query}): {exc}"
+
+            per_query = await asyncio.gather(*(one_query(q) for q in req.queries))
+            got: list[Organization] = []
+            errs: list[str] = []
+            for orgs, err in per_query:  # type: ignore[misc]
+                got.extend(orgs)
+                if err:
+                    errs.append(err)
+            combined = "; ".join(errs) if errs else None
+            return got, combined
 
         timeout = aiohttp.ClientTimeout(total=60)
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -310,6 +326,16 @@ class ScrapeService:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 await self._enrich_directors(session, fresh, progress)
 
+        # Optional site check: не блокирует выдачу, только отфильтровывает
+        # парковки если check_site указан в запросе (или env)
+        if getattr(req, "check_site", False) and fresh:
+            try:
+                timeout = aiohttp.ClientTimeout(total=15)
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    await self._enrich_site_check(session, fresh, progress)
+            except Exception as exc:
+                log.debug("site-check skipped: %s", exc)
+
         if fresh:
             await self.db.save_session(
                 req.niche, [asdict(o) for o in fresh], city=req.city,
@@ -352,6 +378,37 @@ class ScrapeService:
             done += 1
             if progress and (done % 10 == 0 or done == len(orgs)):
                 await progress(f"ЕГРЮЛ: руководители {done}/{len(orgs)}")
+
+        await asyncio.gather(*(one(o) for o in orgs))
+
+    async def _enrich_site_check(self, session, orgs, progress) -> None:
+        """HEAD+GET проверка website, парковки/заглушки помечаются.
+
+        Опционально, включается флагом ScrapeRequest.check_site. Мёртвые сайты
+        не выкидываем из выдачи — только логируем; фильтрацию можно добавить
+        позже когда наберём статистику.
+        """
+        from api.common import check_site_alive
+
+        sem = asyncio.Semaphore(10)
+        done = 0
+
+        async def one(org: Organization) -> None:
+            nonlocal done
+            if not org.website:
+                done += 1
+                return
+            async with sem:
+                try:
+                    alive = await check_site_alive(org.website, session)
+                except Exception as exc:
+                    log.debug("site-check «%s»: %s", org.website, exc)
+                    alive = True  # fail-open
+            if not alive:
+                log.info("site-check: парковка/недоступен %s (%s)", org.website, org.name)
+            done += 1
+            if progress and (done % 10 == 0 or done == len(orgs)):
+                await progress(f"Сайты: проверено {done}/{len(orgs)}")
 
         await asyncio.gather(*(one(o) for o in orgs))
 

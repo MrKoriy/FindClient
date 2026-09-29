@@ -126,6 +126,19 @@ CREATE TABLE IF NOT EXISTS events (
     text        TEXT    NOT NULL DEFAULT '',
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS sequences (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    target_id   INTEGER NOT NULL REFERENCES targets(id),
+    step        INTEGER NOT NULL,
+    body        TEXT    NOT NULL DEFAULT '',
+    due_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+    status      TEXT    NOT NULL DEFAULT 'pending',
+    message_id  INTEGER,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_seq_due ON sequences(status, due_at);
+CREATE INDEX IF NOT EXISTS idx_seq_target ON sequences(target_id);
 """
 
 # Настройки по умолчанию. Лимиты взяты не с потолка: свежий аккаунт
@@ -150,6 +163,10 @@ DEFAULT_SETTINGS = {
     "bai_model": "qwen3.8-flash", # модель генератора (Qwen 3.8 Flash / DeepSeek)
     "enable_humanizer": "1",      # включен скилл Humanizer
     "enable_russian_outreach": "1", # включен скилл Russian Outreach
+    "drip_enabled": "0",            # drip-цепочки выключены по умолчанию
+    "warmup_enabled": "0",          # прогрев аккаунта: лимит растёт первые 14 дней
+    "consecutive_floods": "0",      # счётчик флудов подряд (адаптивный throttle)
+    "warmup_started_at": "",        # ISO дата первого sent (для warmup)
 }
 
 
@@ -408,6 +425,8 @@ async def set_target_status(
                 " updated_at = datetime('now') WHERE id = ?",
                 (status, note, target_id),
             )
+    if status in ("replied", "refused", "blocked"):
+        await cancel_sequences(target_id, crm_db=crm_db)
 
 
 async def save_target_username(target_id: int, username: str, crm_db: str | None = None) -> None:
@@ -540,10 +559,34 @@ async def list_messages(limit: int = 100, crm_db: str | None = None) -> list[dic
     return [dict(r) for r in rows]
 
 
+def effective_daily_cap(settings: dict[str, str]) -> int:
+    """Warmup: первые 14 дней лимит растёт поэтапно. Выкл если warmup_enabled != 1."""
+    cap = int(settings.get("daily_cap", "10"))
+    if settings.get("warmup_enabled") != "1":
+        return cap
+    started = (settings.get("warmup_started_at") or "").strip()
+    if not started:
+        return min(cap, 5)
+    try:
+        from datetime import UTC, datetime
+        dt = datetime.fromisoformat(started)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        days = (datetime.now(UTC) - dt).days
+    except Exception:
+        return cap
+    if days < 0:
+        days = 0
+    if days >= 14:
+        return cap
+    warm_cap = 5 + (days // 3) * 2  # 5,7,9,11,13
+    return min(cap, warm_cap)
+
+
 async def summary(crm_db: str | None = None) -> dict:
     settings = await get_settings(crm_db)
     tz = int(settings.get("timezone_offset", "3"))
-    cap = int(settings.get("daily_cap", "10"))
+    cap = effective_daily_cap(settings)
     today = await sent_today(crm_db, tz)
     counts = await count_targets(crm_db)
     async with connect(crm_db) as conn:
@@ -573,6 +616,124 @@ async def summary(crm_db: str | None = None) -> dict:
         "enabled": settings.get("enabled") == "1",
         "dry_run": settings.get("dry_run") == "1",
     }
+
+
+# --------------------------------------------------------------------------
+# Drip-последовательности
+# --------------------------------------------------------------------------
+
+async def create_sequence(
+    target_id: int,
+    steps: list[dict],
+    crm_db: str | None = None,
+) -> list[int]:
+    """Создаёт шаги drip-цепочки. steps=[{body, due_at, status?}, ...]."""
+    ids: list[int] = []
+    async with connect(crm_db) as conn:
+        for idx, step in enumerate(steps, start=1):
+            body = step.get("body", "")
+            due_at = step.get("due_at")
+            status = step.get("status", "pending")
+            # если due_at не передан — now
+            if due_at is None:
+                cur = await conn.execute(
+                    "INSERT INTO sequences (target_id, step, body, status)"
+                    " VALUES (?, ?, ?, ?)",
+                    (target_id, idx, body, status),
+                )
+            else:
+                cur = await conn.execute(
+                    "INSERT INTO sequences (target_id, step, body, due_at, status)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    (target_id, idx, body, due_at, status),
+                )
+            ids.append(int(cur.lastrowid))
+    return ids
+
+
+async def list_due_sequences(limit: int = 10, crm_db: str | None = None) -> list[dict]:
+    """Pending шаги где due_at <= now."""
+    async with connect(crm_db) as conn:
+        cur = await conn.execute(
+            "SELECT * FROM sequences WHERE status = 'pending'"
+            " AND due_at <= datetime('now') ORDER BY due_at LIMIT ?",
+            (limit,),
+        )
+        rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def cancel_sequences(target_id: int, crm_db: str | None = None) -> int:
+    """Помечает все pending шаги цели как cancelled."""
+    async with connect(crm_db) as conn:
+        cur = await conn.execute(
+            "UPDATE sequences SET status = 'cancelled'"
+            " WHERE target_id = ? AND status = 'pending'",
+            (target_id,),
+        )
+        return cur.rowcount
+
+
+async def mark_sequence_sent(
+    seq_id: int, message_id: int, crm_db: str | None = None
+) -> None:
+    async with connect(crm_db) as conn:
+        await conn.execute(
+            "UPDATE sequences SET status = 'sent', message_id = ? WHERE id = ?",
+            (message_id, seq_id),
+        )
+
+
+async def mark_sequence_queued(
+    seq_id: int, message_id: int, crm_db: str | None = None
+) -> None:
+    async with connect(crm_db) as conn:
+        await conn.execute(
+            "UPDATE sequences SET status = 'queued', message_id = ? WHERE id = ?",
+            (message_id, seq_id),
+        )
+
+
+async def get_target_sequences(
+    target_id: int, crm_db: str | None = None
+) -> list[dict]:
+    async with connect(crm_db) as conn:
+        cur = await conn.execute(
+            "SELECT * FROM sequences WHERE target_id = ? ORDER BY step",
+            (target_id,),
+        )
+        rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def create_drip_sequence(
+    target_id: int,
+    template_bodies: list[str],
+    delays_hours: list[int] | None = None,
+    crm_db: str | None = None,
+) -> list[int]:
+    """Удобный хелпер: первый шаг queued/срок now, остальные pending с задержкой."""
+    if delays_hours is None:
+        delays_hours = [0, 48, 96, 168, 240]
+    ids: list[int] = []
+    async with connect(crm_db) as conn:
+        for idx, body in enumerate(template_bodies):
+            delay = delays_hours[idx] if idx < len(delays_hours) else delays_hours[-1]
+            status = "queued" if idx == 0 else "pending"
+            if delay == 0:
+                cur = await conn.execute(
+                    "INSERT INTO sequences (target_id, step, body, due_at, status)"
+                    " VALUES (?, ?, ?, datetime('now'), ?)",
+                    (target_id, idx + 1, body, status),
+                )
+            else:
+                cur = await conn.execute(
+                    "INSERT INTO sequences (target_id, step, body, due_at, status)"
+                    " VALUES (?, ?, ?, datetime('now', ?), ?)",
+                    (target_id, idx + 1, body, f"+{delay} hours", status),
+                )
+            ids.append(int(cur.lastrowid))
+    return ids
 
 
 # --------------------------------------------------------------------------

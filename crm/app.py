@@ -471,6 +471,148 @@ async def api_offer_improve(request: web.Request) -> web.Response:
     return web.json_response({"text": improved, "classification": classification})
 
 
+async def api_bulk_queue(request: web.Request) -> web.Response:
+    data = await request.json()
+    filt = data.get("filter") or {}
+    status = filt.get("status", "new")
+    city = filt.get("city") or None
+    search = filt.get("search") or None
+    limit_raw = data.get("limit", 20)
+    try:
+        limit = int(limit_raw)
+    except (TypeError, ValueError):
+        return web.json_response({"error": "limit должен быть числом"}, status=400)
+    limit = max(1, min(limit, 100))
+
+    # тело сообщения: template_id или bodies/body
+    bodies: list[str] = []
+    template_id = data.get("template_id")
+    if template_id is not None:
+        try:
+            tid = int(template_id)
+        except (TypeError, ValueError):
+            return web.json_response({"error": "template_id должен быть числом"}, status=400)
+        found = [t for t in await crm_db.list_templates() if t["id"] == tid]
+        if not found:
+            return web.json_response({"error": "шаблон не найден"}, status=404)
+        bodies = [found[0]["body"]]
+    elif data.get("bodies"):
+        raw_bodies = data.get("bodies")
+        if isinstance(raw_bodies, list):
+            bodies = [str(b).strip() for b in raw_bodies if str(b).strip()]
+        else:
+            bodies = [str(raw_bodies).strip()]
+    elif data.get("body"):
+        bodies = [str(data.get("body")).strip()]
+
+    if not bodies:
+        return web.json_response({"error": "нужен template_id или bodies/body"}, status=400)
+
+    body_text = bodies[0]
+    with_link = bool(data.get("with_link", False))
+
+    targets = await crm_db.list_targets(status=status, city=city, search=search, limit=limit)
+    queued = 0
+    skipped = 0
+    for t in targets:
+        chat = (t.get("username") or "").strip()
+        if not chat:
+            skipped += 1
+            continue
+        rendered = tpl.render(body_text, t, link=LINK, with_link=with_link)
+        if not rendered.strip():
+            skipped += 1
+            continue
+        await crm_db.queue_message(t["id"], chat, rendered)
+        queued += 1
+    return web.json_response({"queued": queued, "skipped": skipped, "total": len(targets)})
+
+
+async def api_sequences_list(request: web.Request) -> web.Response:
+    target_id, err = _int_or_400(request.query.get("target_id"), "target_id")
+    if err:
+        return err
+    if target_id is None:
+        return web.json_response({"error": "нужен target_id"}, status=400)
+    items = await crm_db.get_target_sequences(target_id)
+    return web.json_response({"items": items})
+
+
+async def api_sequences_create(request: web.Request) -> web.Response:
+    data = await request.json()
+    target_id = data.get("target_id")
+    try:
+        tid = int(target_id)
+    except (TypeError, ValueError):
+        return web.json_response({"error": "target_id должен быть числом"}, status=400)
+    target = await crm_db.get_target(tid)
+    if not target:
+        return web.json_response({"error": "цель не найдена"}, status=404)
+
+    bodies = data.get("template_bodies") or data.get("bodies") or []
+    if isinstance(bodies, str):
+        bodies = [bodies]
+    template_id = data.get("template_id")
+    if template_id is not None and not bodies:
+        try:
+            tmpl_id = int(template_id)
+        except (TypeError, ValueError):
+            return web.json_response({"error": "template_id должен быть числом"}, status=400)
+        found = [t for t in await crm_db.list_templates() if t["id"] == tmpl_id]
+        if not found:
+            return web.json_response({"error": "шаблон не найден"}, status=404)
+        # если один шаблон - делаем одно касание; если нужен drip - клиент шлёт 5 bodies
+        bodies = [found[0]["body"]]
+
+    if not bodies:
+        return web.json_response({"error": "нужен template_bodies/bodies или template_id"}, status=400)
+
+    delays = data.get("delays_hours")
+    if delays is not None:
+        try:
+            delays = [int(x) for x in delays]
+        except (TypeError, ValueError):
+            return web.json_response({"error": "delays_hours должны быть числами"}, status=400)
+    else:
+        delays = [0, 48, 96, 168, 240]
+
+    # рендерим под цель если нужно
+    with_link = bool(data.get("with_link", False))
+    rendered_bodies = [tpl.render(b, target, link=LINK, with_link=with_link) for b in bodies]
+
+    ids = await crm_db.create_drip_sequence(tid, rendered_bodies, delays_hours=delays)
+    # первый шаг сразу в очередь сообщений
+    first = (await crm_db.get_target_sequences(tid))[0] if ids else None
+    if first and first["status"] == "queued":
+        chat = (target.get("username") or "").strip()
+        if chat:
+            mid = await crm_db.queue_message(tid, chat, first["body"])
+            await crm_db.mark_sequence_queued(first["id"], mid)
+        else:
+            # некуда отправлять - оставляем как pending
+            pass
+    items = await crm_db.get_target_sequences(tid)
+    return web.json_response({"ok": True, "ids": ids, "items": items})
+
+
+async def api_sequences_cancel(request: web.Request) -> web.Response:
+    seq_id, err = _int_or_400(request.match_info["id"], "id")
+    if err:
+        return err
+    # пытаемся отменить конкретный шаг
+    async with crm_db.connect() as conn:
+        cur = await conn.execute("SELECT * FROM sequences WHERE id = ?", (seq_id,))
+        row = await cur.fetchone()
+        if not row:
+            return web.json_response({"error": "шаг не найден"}, status=404)
+        if row["status"] == "pending":
+            await conn.execute(
+                "UPDATE sequences SET status = 'cancelled' WHERE id = ?", (seq_id,)
+            )
+        # поддержка target_id-отмены: ?target_id=X отменяет все pending цели
+    return web.json_response({"ok": True})
+
+
 async def index(request: web.Request) -> web.Response:
     path = STATIC / "index.html"
     if not path.exists():
@@ -489,6 +631,7 @@ def create_app() -> web.Application:
         web.get("/api/targets", api_targets),
         web.post("/api/targets/import", api_import_targets),
         web.post("/api/targets/seed_demo", api_seed_demo_targets),
+        web.post("/api/targets/bulk_queue", api_bulk_queue),
         web.post("/api/targets/{id}/status", api_target_status),
         web.post("/api/targets/{id}/username", api_target_username),
         web.get("/api/preview", api_preview),
@@ -505,6 +648,9 @@ def create_app() -> web.Application:
         web.post("/api/offer/classify", api_offer_classify),
         web.post("/api/offer/improve", api_offer_improve),
         web.route("*", "/api/settings", api_settings),
+        web.get("/api/sequences", api_sequences_list),
+        web.post("/api/sequences", api_sequences_create),
+        web.post("/api/sequences/{id}/cancel", api_sequences_cancel),
     ])
     return app
 

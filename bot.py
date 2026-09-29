@@ -73,6 +73,7 @@ async def main() -> None:
     scrape_service = ScrapeService(
         db=db, request_delay=settings.REQUEST_DELAY,
         yandex_api_key=settings.YANDEX_API_KEY, proxy=settings.HTTP_PROXY,
+        proxy_pool=settings.proxy_pool,
     )
 
     await bot.set_my_commands(COMMANDS)

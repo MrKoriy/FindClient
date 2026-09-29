@@ -95,12 +95,61 @@ def make_client():
     return TelegramClient(SESSION, API_ID, API_HASH)
 
 
-async def send_one(client, message: dict, settings: dict) -> tuple[str, str, int | None]:
+async def _adaptive_throttle(crm_path: str | None, wait: int = 0, peer_flood: bool = False) -> None:
+    """Снижает daily_cap и увеличивает cooldown при флуд-ошибках.
+
+    Логика:
+    - consecutive_floods ++; после 3 флудов cap падает сильнее (x0.5 вместо x0.6)
+    - новый cap = max(5, int(cap * factor))
+    - cooldown_seconds = min(3600, int(cooldown * 1.5))
+    - пишет событие flood в лог
+    """
+    settings = await crm_db.get_settings(crm_path)
+    cap = int(settings.get("daily_cap", "10"))
+    cooldown = int(settings.get("cooldown_seconds", "1200"))
+    consecutive = int(settings.get("consecutive_floods", "0")) + 1
+    factor = 0.5 if consecutive >= 3 else 0.6
+    new_cap = max(5, int(cap * factor))
+    new_cooldown = min(3600, int(cooldown * 1.5))
+    await crm_db.set_settings(
+        {"daily_cap": str(new_cap), "cooldown_seconds": str(new_cooldown),
+         "consecutive_floods": str(consecutive)},
+        crm_path,
+    )
+    reason = "PeerFlood" if peer_flood else f"FloodWait {wait}с"
+    try:
+        msg = f"{reason}: cap {cap}->{new_cap}, cooldown {cooldown}->{new_cooldown}, n={consecutive}"  # noqa: E501
+        await crm_db.log_event("flood", msg, crm_path)
+    except Exception:
+        pass
+    log.warning(
+        "adaptive throttle: %s cap %s->%s cooldown %s->%s floods=%s",  # noqa: E501
+        reason, cap, new_cap, cooldown, new_cooldown, consecutive,
+    )
+
+
+async def _reset_floods_on_success(crm_path: str | None) -> None:
+    """Сброс consecutive_floods и запись warmup_started_at при первой успешной отправке."""
+    settings = await crm_db.get_settings(crm_path)
+    updates: dict[str, str] = {}
+    if int(settings.get("consecutive_floods", "0")) != 0:
+        updates["consecutive_floods"] = "0"
+    if not (settings.get("warmup_started_at") or "").strip():
+        from datetime import UTC
+        from datetime import datetime as _dt
+        updates["warmup_started_at"] = _dt.now(UTC).isoformat()
+    if updates:
+        await crm_db.set_settings(updates, crm_path)
+
+
+async def send_one(client, message: dict, settings: dict, crm_path: str | None = None) -> tuple[str, str, int | None]:
     """Отправляет одно сообщение. Возвращает (статус, ошибка, tg_id).
 
     Проверка холостого хода стоит до импорта Telethon намеренно: в холостом
     режиме ничего не отправляется, и требовать установленный Telethon для
     прогона очереди «на сухую» незачем.
+
+    При FloodWait > 300с и PeerFlood автоматически снижает cap (adaptive throttle).
     """
     chat = (message.get("chat") or "").strip()
     if not chat:
@@ -122,10 +171,13 @@ async def send_one(client, message: dict, settings: dict) -> tuple[str, str, int
         except FloodWaitError as exc:
             wait = int(exc.seconds)
             log.warning("FloodWait %s с (~%.1f ч)", wait, wait / 3600)
+            if wait > 300:
+                await _adaptive_throttle(crm_path, wait=wait)
             if wait > MAX_INLINE_WAIT or attempt == 1:
                 return "queued", f"FloodWait {wait} с", None
             await asyncio.sleep(wait + 5)
         except PeerFloodError:
+            await _adaptive_throttle(crm_path, peer_flood=True)
             return "failed", "PEER_FLOOD: аккаунт ограничен для сообщений незнакомым", None
         except UserPrivacyRestrictedError:
             return "failed", "приватность получателя запрещает сообщения", None
@@ -148,7 +200,10 @@ async def run_once(client, crm_path: str | None = None) -> bool:
         log.info("вне рабочих часов (%s)", local_now(settings).strftime("%H:%M"))
         return False
 
-    cap = int(settings.get("daily_cap", "10"))
+    try:
+        cap = crm_db.effective_daily_cap(settings)
+    except AttributeError:
+        cap = int(settings.get("daily_cap", "10"))
     today = await crm_db.sent_today(
         crm_path, tz_offset=int(settings.get("timezone_offset", "3"))
     )
@@ -156,12 +211,27 @@ async def run_once(client, crm_path: str | None = None) -> bool:
         log.info("дневной лимит выбран: %s/%s", today, cap)
         return False
 
+    # Drip: проверить созревшие шаги и поставить их в очередь
+    try:
+        due = await crm_db.list_due_sequences(limit=10, crm_db=crm_path)
+    except Exception:
+        due = []
+    for seq in due:
+        target = await crm_db.get_target(seq["target_id"], crm_db=crm_path)
+        chat = (target.get("username") if target else "") or ""
+        if not chat:
+            # некуда отправлять — пропускаем, оставляем pending
+            continue
+        mid = await crm_db.queue_message(seq["target_id"], chat, seq["body"], crm_db=crm_path)
+        await crm_db.mark_sequence_queued(seq["id"], mid, crm_db=crm_path)
+        log.info("drip step %s -> queued as message %s for @%s", seq["id"], mid, chat)
+
     message = await crm_db.next_queued(crm_path)
     if not message:
         return False
 
     log.info("отправляю @%s (%s/%s за сегодня)", message["chat"], today + 1, cap)
-    status, error, tg_id = await send_one(client, message, settings)
+    status, error, tg_id = await send_one(client, message, settings, crm_path)
     if status == "queued":
         # Долгий FloodWait: проваленным сообщение НЕ помечаем - оно остаётся
         # в очереди и уйдёт после снятия лимита. Пауза здесь, чтобы main()
@@ -173,6 +243,7 @@ async def run_once(client, crm_path: str | None = None) -> bool:
     log.info("  -> %s %s", status, error)
 
     if status == "sent":
+        await _reset_floods_on_success(crm_path)
         every = int(settings.get("cooldown_every", "8"))
         sent_so_far = today + 1
         if every and sent_so_far % every == 0:

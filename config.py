@@ -32,8 +32,19 @@ class Settings:
     TG_SESSION: str = ""
     ORDERS_POLL_INTERVAL: int = 300
     HTTP_PROXY: str = ""
+    # Comma-separated proxy pool for Yandex rotation (заготовка x4 объёма).
+    HTTP_PROXY_POOL: str = ""
+    YANDEX_PROXY_POOL: str = ""
     # База CRM-панели для кнопки /crm: куда вести юзера за одноразовым токеном.
     CRM_URL: str = "https://94-103-1-126.sslip.io:9444"
+
+    @property
+    def proxy_pool(self) -> list[str]:
+        """Объединённый список прокси из HTTP_PROXY_POOL / YANDEX_PROXY_POOL."""
+        raw = ",".join(p for p in (self.HTTP_PROXY_POOL, self.YANDEX_PROXY_POOL) if p)
+        if not raw:
+            return []
+        return [p.strip() for p in raw.replace(";", ",").split(",") if p.strip()]
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -64,5 +75,7 @@ class Settings:
             TG_SESSION=env("TG_SESSION", "").strip(),
             ORDERS_POLL_INTERVAL=int(env("ORDERS_POLL_INTERVAL", "300") or 300),
             HTTP_PROXY=env("HTTP_PROXY", "").strip(),
+            HTTP_PROXY_POOL=env("HTTP_PROXY_POOL", "").strip(),
+            YANDEX_PROXY_POOL=env("YANDEX_PROXY_POOL", "").strip(),
             CRM_URL=env("CRM_URL", "").strip() or "https://94-103-1-126.sslip.io:9444",
         )
