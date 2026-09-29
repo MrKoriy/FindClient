@@ -23,6 +23,12 @@ try:
 except ImportError:  # pragma: no cover
     rerank_orders = None  # type: ignore
 
+try:
+    from services.classifier import SITE_ORDER_Q, qualify_texts  # type: ignore
+except ImportError:  # pragma: no cover
+    SITE_ORDER_Q = ""  # type: ignore
+    qualify_texts = None  # type: ignore
+
 log = logging.getLogger(__name__)
 
 # Per-chat settings keys.
@@ -62,6 +68,7 @@ class OrdersService:
         bai_api_key: str = "",
         bai_base_url: str = "",
         bai_model: str = "",
+        llm=None,
     ) -> None:
         self.db = db
         self.sender = sender
@@ -71,6 +78,7 @@ class OrdersService:
         self.bai_api_key = bai_api_key
         self.bai_base_url = bai_base_url
         self.bai_model = bai_model
+        self.llm = llm
         self.last_errors: dict[str, str] = {}
         self._task: asyncio.Task | None = None
 
@@ -120,6 +128,7 @@ class OrdersService:
         first_run = (await self.db.get_stats())["orders_seen"] == 0
         new_uids = await self.db.filter_new_order_uids(list(by_uid))
         new_orders = [by_uid[u] for u in by_uid if u in new_uids]
+        rejected = await self._jev_rejects(new_orders, configs)
 
         # optional LLM rerank — fall back to CRM B.AI settings if bot env key empty
         bai_key = self.bai_api_key
@@ -181,7 +190,8 @@ class OrdersService:
                 if llm_map:
                     hits = [
                         o for o in new_orders
-                        if self._source_key(o) in cfg["sources"]
+                        if o.uid not in rejected
+                        and self._source_key(o) in cfg["sources"]
                         and llm_map.get(o.uid, {}).get("relevant", matches(o, cfg["keywords"], cfg["minus"]))
                     ]
                     # sort hits by llm score desc
@@ -189,12 +199,14 @@ class OrdersService:
                 else:
                     hits = [
                         o for o in new_orders
-                        if self._source_key(o) in cfg["sources"] and matches(o, cfg["keywords"], cfg["minus"])
+                        if o.uid not in rejected
+                        and self._source_key(o) in cfg["sources"] and matches(o, cfg["keywords"], cfg["minus"])
                     ]
             else:
                 hits = [
                     o for o in new_orders
-                    if self._source_key(o) in cfg["sources"] and matches(o, cfg["keywords"], cfg["minus"])
+                    if o.uid not in rejected
+                    and self._source_key(o) in cfg["sources"] and matches(o, cfg["keywords"], cfg["minus"])
                 ]
             if first_run and len(hits) > _FIRST_RUN_LIMIT:
                 truncated_uids.update(o.uid for o in hits[_FIRST_RUN_LIMIT:])
@@ -221,6 +233,17 @@ class OrdersService:
             and o.uid not in truncated_uids
         ])
         return sent
+
+    async def _jev_rejects(self, orders: list[Order], configs: dict) -> set[str]:
+        if not (getattr(self, "llm", None) and getattr(self.llm, "jev_enabled", False)):
+            return set()
+        if qualify_texts is None:
+            return set()
+        candidates = [o for o in orders if any(matches(o, cfg["keywords"], cfg["minus"]) for cfg in configs.values())]
+        if not candidates:
+            return set()
+        probs = await qualify_texts(self.llm, [f"{o.title}\n{o.description}" for o in candidates], SITE_ORDER_Q)  # type: ignore[arg-type]
+        return {o.uid for o, p in zip(candidates, probs) if p is not None and p < 0.4}
 
     @staticmethod
     def _source_key(o: Order) -> str:

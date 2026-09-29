@@ -1,6 +1,7 @@
 """Application settings loaded from environment variables."""
 
 import os
+import re
 from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
@@ -20,6 +21,7 @@ class Settings:
     """Application configuration loaded from .env file."""
 
     BOT_TOKEN: str
+    PAGE_SIZE: int = 50
     REQUEST_DELAY: float = 0.3
     # Telegram user IDs allowed to use the bot. Empty = anyone (not recommended).
     OWNER_IDS: frozenset[int] = field(default_factory=frozenset)
@@ -38,9 +40,19 @@ class Settings:
     # База CRM-панели для кнопки /crm: куда вести юзера за одноразовым токеном.
     CRM_URL: str = "https://94-103-1-126.sslip.io:9444"
     ORDERS_LLM_RERANK: bool = False
+    # Extra Telegram accounts for outreach (TG_SESSION_2, TG_SESSION_3, ...).
+    TG_EXTRA_SESSIONS: tuple[str, ...] = ()
+    # LLM: DeepSeek via B.AI; Jev (TypeSafe) for typed classification.
     BAI_API_KEY: str = ""
     BAI_BASE_URL: str = "https://api.b.ai/v1"
-    BAI_MODEL: str = "qwen3.8-flash"
+    BAI_MODEL: str = "DeepSeek-V4.1-Flash"
+    TYPESAFE_API_KEY: str = ""
+    JEV_MODEL: str = "jev-latest"
+    # Demo sites web server (no domain yet: http://<VPS_IP>:8080).
+    DEMO_BASE_URL: str = ""
+    WEB_PORT: int = 8080
+    OUTREACH_DAILY_MAX: int = 20
+    OUTREACH_WORK_HOURS: str = "10-19"
 
     @property
     def proxy_pool(self) -> list[str]:
@@ -49,6 +61,10 @@ class Settings:
         if not raw:
             return []
         return [p.strip() for p in raw.replace(";", ",").split(",") if p.strip()]
+
+    @property
+    def telegram_user_enabled(self) -> bool:
+        return bool(self.TG_API_ID and self.TG_API_HASH and self.TG_SESSION)
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -83,7 +99,17 @@ class Settings:
             YANDEX_PROXY_POOL=env("YANDEX_PROXY_POOL", "").strip(),
             CRM_URL=env("CRM_URL", "").strip() or "https://94-103-1-126.sslip.io:9444",
             ORDERS_LLM_RERANK=env("ORDERS_LLM_RERANK", "").strip() in ("1", "true", "True"),
+            TG_EXTRA_SESSIONS=tuple(
+                v.strip() for k, v in sorted(os.environ.items())
+                if re.fullmatch(r"TG_SESSION_\d+", k) and v.strip()
+            ),
             BAI_API_KEY=env("BAI_API_KEY", "").strip(),
             BAI_BASE_URL=env("BAI_BASE_URL", "https://api.b.ai/v1").strip() or "https://api.b.ai/v1",
-            BAI_MODEL=env("BAI_MODEL", "qwen3.8-flash").strip() or "qwen3.8-flash",
+            BAI_MODEL=env("BAI_MODEL", "DeepSeek-V4.1-Flash").strip() or "DeepSeek-V4.1-Flash",
+            TYPESAFE_API_KEY=env("TYPESAFE_API_KEY", "").strip(),
+            JEV_MODEL=env("JEV_MODEL", "jev-latest").strip() or "jev-latest",
+            DEMO_BASE_URL=env("DEMO_BASE_URL", "").strip(),
+            WEB_PORT=int(env("WEB_PORT", "8080") or 8080),
+            OUTREACH_DAILY_MAX=int(env("OUTREACH_DAILY_MAX", "20") or 20),
+            OUTREACH_WORK_HOURS=env("OUTREACH_WORK_HOURS", "10-19").strip() or "10-19",
         )

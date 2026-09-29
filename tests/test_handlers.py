@@ -12,15 +12,15 @@ from handlers.common import document, grid, kb, plural
 from handlers.orders import _split
 from handlers.start import make_crm_auth_view
 
+EXPECTED_ROUTERS = 9  # start/scrape/niches/orders/outreach/offers/tg_leads/history/stats
+
 
 def test_all_routers_register():
     dp = Dispatcher()
     handlers.register_routers(dp)
-    # каждый из семи роутеров внёс свои хендлеры
-    assert len(dp.sub_routers) == 7
-    # у роутеров есть наблюдатели (message/callback_query), регистрация не пустая
+    assert len(dp.sub_routers) == EXPECTED_ROUTERS
     handled = [r for r in dp.sub_routers if r.message.handlers or r.callback_query.handlers]
-    assert len(handled) == 7
+    assert len(handled) == EXPECTED_ROUTERS
 
 
 def test_make_crm_auth_view_uses_settings_url():

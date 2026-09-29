@@ -369,3 +369,18 @@ class Database:
             ],
         )
         await self._conn.commit()
+
+    async def get_tg_leads(self, niche: str | None = None, limit: int = 1000) -> list[dict]:
+        if niche:
+            cur = await self._conn.execute(
+                "SELECT user_id, username, name, niche, chats FROM tg_leads WHERE niche = ? LIMIT ?",
+                (niche, limit),
+            )
+        else:
+            cur = await self._conn.execute(
+                "SELECT user_id, username, name, niche, chats FROM tg_leads LIMIT ?", (limit,),
+            )
+        return [
+            {"user_id": r[0], "username": r[1], "name": r[2], "niche": r[3], "chats": r[4]}
+            for r in await cur.fetchall()
+        ]
