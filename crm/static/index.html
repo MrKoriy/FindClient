@@ -1558,6 +1558,30 @@
       min-height: 44px;
     }
   }
+
+  /* Kanban & Drip — added for bulk/kanban/sequences */
+  .kanban-board { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; align-items: start; }
+  @media (max-width: 1100px) { .kanban-board { grid-template-columns: repeat(3, 1fr); } }
+  @media (max-width: 700px) { .kanban-board { grid-template-columns: 1fr; } }
+  .kanban-col { background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; min-height: 220px; display: flex; flex-direction: column; gap: 8px; }
+  .kanban-col-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 8px 10px; font-weight: 700; font-size: 12px; border-bottom: 1px solid var(--border); margin: -8px -8px 8px; background: var(--bg-card); border-radius: var(--radius) var(--radius) 0 0; }
+  .kanban-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; cursor: pointer; transition: var(--transition); }
+  .kanban-card:hover { border-color: var(--border-strong); transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+  .kanban-card.selected { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+  .kanban-card .kc-name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kanban-card .kc-meta { font-size: 11.5px; color: var(--text-secondary); margin-top: 2px; }
+  .kanban-card .kc-actions { display: flex; gap: 6px; margin-top: 8px; }
+  .bulk-bar { position: sticky; top: 0; z-index: 5; background: var(--primary-light); border: 1px solid var(--primary-border); border-radius: var(--radius); padding: 10px 14px; display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+  .view-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-full); overflow: hidden; }
+  .view-toggle button { padding: 6px 12px; font-size: 12px; border: none; background: transparent; cursor: pointer; color: var(--text-secondary); }
+  .view-toggle button.active { background: var(--primary); color: #fff; }
+  .seq-timeline { display: flex; flex-direction: column; gap: 8px; }
+  .seq-step { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-subtle); }
+  .seq-step.pending { border-left: 3px solid var(--warn); }
+  .seq-step.queued { border-left: 3px solid var(--primary); }
+  .seq-step.sent { border-left: 3px solid var(--ok); }
+  .seq-step.cancelled { opacity: 0.5; border-left: 3px solid var(--text-dim); }
+  .seq-step-num { width: 24px; height: 24px; border-radius: 50%; background: var(--bg-card); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; }
 </style>
 </head>
 <body>
@@ -2069,19 +2093,77 @@ async function viewDash(v) {
 }
 
 // --------------------------------------------------------------------------
-// View: Targets (Цели)
+// View: Targets (Цели) — table + kanban + bulk + drip
 // --------------------------------------------------------------------------
 let tFilters = { status: "", search: "", limit: 100, offset: 0 };
+let tSelected = new Set();
+let tView = localStorage.getItem("crm_targets_view") || "table";
+let _bulkTplsCache = null;
+async function _getBulkTpls() {
+  if (_bulkTplsCache) return _bulkTplsCache;
+  try { _bulkTplsCache = (await api.get("/api/templates")).items; } catch(_) { _bulkTplsCache = []; }
+  return _bulkTplsCache;
+}
+function _toggleTarget(id, checked) {
+  if (checked) tSelected.add(id); else tSelected.delete(id);
+  const el = document.getElementById("bulkBar");
+  if (el) el.style.display = tSelected.size ? "flex" : "none";
+  const cnt = document.getElementById("bulkCount");
+  if (cnt) cnt.textContent = tSelected.size;
+  const chkAll = document.getElementById("chkAll");
+  if (chkAll) {
+    const allIds = [...document.querySelectorAll("[data-check]")].map(e => +e.dataset.check);
+    chkAll.checked = allIds.length && allIds.every(x => tSelected.has(x));
+    chkAll.indeterminate = tSelected.size > 0 && !chkAll.checked;
+  }
+}
+async function _bulkQueue(tplId, limitVal) {
+  const tpls = await _getBulkTpls();
+  const body = tpls.find(x => +x.id === +tplId);
+  if (!body) { toast("Выберите шаблон", "error"); return; }
+  const lim = Math.max(1, Math.min(100, +limitVal || tSelected.size || 20));
+  // bulk по выбранным: идём по tSelected, шлём по одному через queue
+  let queued = 0, skipped = 0;
+  for (const tid of [...tSelected]) {
+    try {
+      const target = (await api.get("/api/targets?limit=1000")).items.find(x => x.id === tid);
+      const chat = target ? (target.username || "").trim() : "";
+      if (!chat) { skipped++; continue; }
+      const rendered = (await api.get(`/api/preview?target_id=${tid}&template_id=${tplId}&with_link=0`)).text;
+      await api.send("/api/queue", { target_id: tid, body: rendered, kind: "dm" });
+      queued++;
+    } catch(e) { skipped++; }
+    if (queued >= lim) break;
+  }
+  if (!queued && !tSelected.size) {
+    // fallback: server bulk_queue по фильтру
+    try {
+      const r = await api.send("/api/targets/bulk_queue", { filter: { status: tFilters.status || "new", search: tFilters.search || "" }, template_id: tplId, limit: lim });
+      queued = r.queued; skipped = r.skipped;
+    } catch(e) { toast(e.message, "error"); return; }
+  }
+  toast(`В очередь: ${queued}, пропущено: ${skipped}`);
+  tSelected.clear(); route();
+}
+async function _bulkStatus(newStatus) {
+  if (!tSelected.size) { toast("Выберите цели", "error"); return; }
+  let ok = 0;
+  for (const tid of [...tSelected]) { try { await api.send(`/api/targets/${tid}/status`, { status: newStatus }); ok++; } catch(_){} }
+  toast(`Статус обновлён: ${ok}`);
+  tSelected.clear(); route();
+}
 async function viewTargets(v) {
   const q = new URLSearchParams();
   if (tFilters.status) q.set("status", tFilters.status);
   if (tFilters.search) q.set("search", tFilters.search);
   q.set("limit", tFilters.limit);
   q.set("offset", tFilters.offset);
-
   const d = await api.get("/api/targets?" + q);
+  const tpls = await _getBulkTpls();
   const statusOptions = [["", "Все статусы"]].concat(Object.entries(STATUS_LABELS))
     .map(([k, l]) => `<option value="${k}" ${k === tFilters.status ? "selected" : ""}>${esc(l)}</option>`).join("");
+  const tplOptions = tpls.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join("");
+  const kanbanStatuses = ["new","queued","sent","replied","blocked"];
 
   v.innerHTML = `
   <div class="panel">
@@ -2091,22 +2173,64 @@ async function viewTargets(v) {
       <button class="btn btn-primary" id="fGo">Найти</button>
       <button class="btn btn-secondary" id="fReset">Сбросить</button>
       <div class="spacer"></div>
+      <div class="view-toggle" title="Вид">
+        <button class="${tView==='table'?'active':''}" data-view="table">Таблица</button>
+        <button class="${tView==='kanban'?'active':''}" data-view="kanban">Канбан</button>
+      </div>
       <button class="btn btn-secondary" id="btnSeedDemoTargets">${ICONS.sparkles} Демо-цели</button>
-      <button class="btn btn-secondary" id="doImport">Подтянуть из базы</button>
+      <button class="btn btn-secondary" id="doImport">Подтянуть</button>
     </div>
     <div class="dim" style="font-size:12.5px">
-      Найдено: <b>${num(d.counts.all)}</b> всего · показано <b>${d.items.length}</b> (с ${tFilters.offset + 1} по ${tFilters.offset + d.items.length})
+      Найдено: <b>${num(d.counts.all)}</b> всего · показано <b>${d.items.length}</b> (с ${tFilters.offset + 1} по ${tFilters.offset + d.items.length}) · выбрано <b id="bulkCount">${tSelected.size}</b>
+    </div>
+    <div id="bulkBar" class="bulk-bar" style="display:${tSelected.size?'flex':'none'};margin-top:12px">
+      <span style="font-weight:700;font-size:12.5px">Массово: выбрано <b id="bulkCount2">${tSelected.size}</b></span>
+      <select id="bulkTpl" style="min-width:180px">${tplOptions || '<option value="">нет шаблонов</option>'}</select>
+      <input id="bulkLimit" type="number" min="1" max="100" value="${Math.min(20, tSelected.size||20)}" style="width:90px" title="Лимит">
+      <button class="btn btn-primary btn-sm" id="btnBulkQueue">${ICONS.send} В очередь</button>
+      <select id="bulkStatus" style="min-width:140px"><option value="">Статус...</option>${Object.entries(STATUS_LABELS).map(([k,l])=>`<option value="${k}">${esc(l)}</option>`).join("")}</select>
+      <button class="btn btn-secondary btn-sm" id="btnBulkStatus">Статус</button>
+      <button class="btn btn-secondary btn-sm" id="btnBulkClear">Снять выбор</button>
     </div>
   </div>
-
+  ${tView==='kanban' ? `
+  <div class="kanban-board">
+    ${kanbanStatuses.map(st => {
+      const items = d.items.filter(x => x.status===st);
+      return `<div class="kanban-col" data-kanban="${st}">
+        <div class="kanban-col-head"><span>${esc(STATUS_LABELS[st])}</span><span class="tag s-${st}">${items.length}</span></div>
+        ${items.length ? items.map(t => `
+          <div class="kanban-card ${tSelected.has(t.id)?'selected':''}" data-card="${t.id}">
+            <label style="display:flex;gap:6px;align-items:center;margin-bottom:6px"><input type="checkbox" data-check="${t.id}" ${tSelected.has(t.id)?'checked':''}> <span class="kc-name" title="${esc(t.name)}">${esc(t.name)||'без названия'}</span></label>
+            <div class="kc-meta">${esc(t.category||'-')} · ${esc(t.city||'-')} · ${t.username?'@'+esc(t.username):'без tg'}</div>
+            ${t.director?`<div class="kc-meta">ЛПР: ${esc(t.director)}</div>`:''}
+            <div class="kc-actions">
+              <button class="btn btn-purple btn-sm" data-offer="${t.id}">${ICONS.sparkles}</button>
+              <button class="btn btn-secondary btn-sm" data-preview="${t.id}">Текст</button>
+              <button class="btn btn-secondary btn-sm" data-drip="${t.id}" title="Drip 5 касаний">Drip</button>
+            </div>
+          </div>`).join("") : `<div class="dim" style="padding:12px;text-align:center;font-size:12px">— пусто —</div>`}
+      </div>`;
+    }).join("")}
+  </div>
+  <div class="panel" style="margin-top:12px">
+    <div class="row">
+      <button class="btn btn-secondary btn-sm" id="prevPage" ${tFilters.offset <= 0 ? "disabled" : ""}>← Назад</button>
+      <span class="dim" style="font-size:12px">Стр. ${Math.floor(tFilters.offset / tFilters.limit) + 1}</span>
+      <button class="btn btn-secondary btn-sm" id="nextPage" ${tFilters.offset + d.limit >= d.counts.all ? "disabled" : ""}>Вперед →</button>
+      <div class="spacer"></div>
+    </div>
+  </div>
+  ` : `
   <div class="panel" style="padding:0">
     <div class="table-wrap" style="border:0">
       <table>
         <thead>
           <tr>
+            <th><input type="checkbox" id="chkAll"></th>
             <th>Компания / Ниша</th>
             <th>Контакты</th>
-            <th>Рейтинг и отзывы</th>
+            <th>Рейтинг</th>
             <th>Город</th>
             <th>Статус</th>
             <th style="text-align:right">Действия</th>
@@ -2115,6 +2239,7 @@ async function viewTargets(v) {
         <tbody>
           ${d.items.length ? d.items.map(t => `
             <tr>
+              <td><input type="checkbox" data-check="${t.id}" ${tSelected.has(t.id)?'checked':''}></td>
               <td>
                 <div style="font-weight:600">${esc(t.name) || "<span class='dim'>без названия</span>"}</div>
                 <div class="dim" style="font-size:12px">${esc(t.category) || "-"}</div>
@@ -2135,17 +2260,17 @@ async function viewTargets(v) {
               <td>${esc(t.city) || "<span class='dim'>-</span>"}</td>
               <td>${tag(t.status)}</td>
               <td style="text-align:right">
-                <div style="display:inline-flex;gap:6px">
-                  <button class="btn btn-purple btn-sm" data-offer="${t.id}" title="Сгенерировать оффер в студии">${ICONS.sparkles} Оффер</button>
-                  <button class="btn btn-secondary btn-sm" data-preview="${t.id}" title="Быстрый просмотр и очередь">Текст</button>
+                <div style="display:inline-flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+                  <button class="btn btn-purple btn-sm" data-offer="${t.id}" title="Оффер">${ICONS.sparkles}</button>
+                  <button class="btn btn-secondary btn-sm" data-preview="${t.id}">Текст</button>
+                  <button class="btn btn-secondary btn-sm" data-drip="${t.id}" title="Drip 5 касаний">Drip</button>
                 </div>
               </td>
             </tr>
-          `).join("") : `<tr><td colspan="6" style="text-align:center;padding:36px" class="dim"><div>Ничего не найдено по заданным фильтрам.</div><div style="margin-top:10px"><button class="btn btn-purple btn-sm" id="btnEmptySeed">${ICONS.sparkles} Загрузить 5 демо-целей</button></div></td></tr>`}
+          `).join("") : `<tr><td colspan="7" style="text-align:center;padding:36px" class="dim"><div>Ничего не найдено.</div><div style="margin-top:10px"><button class="btn btn-purple btn-sm" id="btnEmptySeed">${ICONS.sparkles} Загрузить 5 демо-целей</button></div></td></tr>`}
         </tbody>
       </table>
     </div>
-
     <div class="row" style="padding:14px 18px;border-top:1px solid var(--border)">
       <button class="btn btn-secondary btn-sm" id="prevPage" ${tFilters.offset <= 0 ? "disabled" : ""}>← Назад</button>
       <span class="dim" style="font-size:12px">Страница ${Math.floor(tFilters.offset / tFilters.limit) + 1}</span>
@@ -2159,8 +2284,9 @@ async function viewTargets(v) {
         </select>
       </label>
     </div>
-  </div>`;
+  </div>`}`;
 
+  v.querySelectorAll("[data-view]").forEach(b => b.onclick = () => { tView=b.dataset.view; localStorage.setItem("crm_targets_view", tView); route(); });
   v.querySelector("#fGo").onclick = () => {
     tFilters.status = v.querySelector("#fStatus").value;
     tFilters.search = v.querySelector("#fSearch").value.trim();
@@ -2168,9 +2294,36 @@ async function viewTargets(v) {
   };
   v.querySelector("#fSearch").onkeydown = e => { if (e.key === "Enter") v.querySelector("#fGo").click(); };
   v.querySelector("#fReset").onclick = () => { tFilters.status = ""; tFilters.search = ""; tFilters.offset = 0; route(); };
-  v.querySelector("#prevPage").onclick = () => { tFilters.offset = Math.max(0, tFilters.offset - tFilters.limit); route(); };
-  v.querySelector("#nextPage").onclick = () => { tFilters.offset += tFilters.limit; route(); };
-  v.querySelector("#selLimit").onchange = e => { tFilters.limit = +e.target.value; tFilters.offset = 0; route(); };
+  const prev = v.querySelector("#prevPage"); if (prev) prev.onclick = () => { tFilters.offset = Math.max(0, tFilters.offset - tFilters.limit); route(); };
+  const next = v.querySelector("#nextPage"); if (next) next.onclick = () => { tFilters.offset += tFilters.limit; route(); };
+  const selLim = v.querySelector("#selLimit"); if (selLim) selLim.onchange = e => { tFilters.limit = +e.target.value; tFilters.offset = 0; route(); };
+  const chkAll = v.querySelector("#chkAll");
+  if (chkAll) chkAll.onchange = e => {
+    v.querySelectorAll("[data-check]").forEach(ch => { ch.checked = e.target.checked; _toggleTarget(+ch.dataset.check, e.target.checked); });
+    // refresh bulk bar count
+    const c2 = document.getElementById("bulkCount2"); if (c2) c2.textContent = tSelected.size;
+  };
+  v.querySelectorAll("[data-check]").forEach(ch => {
+    ch.onchange = e => _toggleTarget(+e.target.dataset.check, e.target.checked);
+  });
+
+  // bulk bar actions
+  const bq = v.querySelector("#btnBulkQueue");
+  if (bq) bq.onclick = async () => {
+    const tplId = v.querySelector("#bulkTpl").value;
+    const lim = v.querySelector("#bulkLimit").value;
+    bq.disabled = true;
+    try { await _bulkQueue(tplId, lim); } catch(e){ toast(e.message,"error"); bq.disabled=false; }
+  };
+  const bs = v.querySelector("#btnBulkStatus");
+  if (bs) bs.onclick = async () => {
+    const st = v.querySelector("#bulkStatus").value;
+    if (!st) { toast("Выберите статус","error"); return; }
+    bs.disabled = true;
+    try { await _bulkStatus(st); } catch(e){ toast(e.message,"error"); bs.disabled=false; }
+  };
+  const bc = v.querySelector("#btnBulkClear");
+  if (bc) bc.onclick = () => { tSelected.clear(); route(); };
 
   const btnSeedTargets = v.querySelector("#btnSeedDemoTargets");
   if (btnSeedTargets) {
@@ -2186,7 +2339,6 @@ async function viewTargets(v) {
       }
     };
   }
-
   const btnEmptySeed = v.querySelector("#btnEmptySeed");
   if (btnEmptySeed) {
     btnEmptySeed.onclick = async () => {
@@ -2201,7 +2353,6 @@ async function viewTargets(v) {
       }
     };
   }
-
   v.querySelector("#doImport").onclick = async e => {
     e.target.disabled = true;
     try {
@@ -2209,7 +2360,6 @@ async function viewTargets(v) {
       toast(`Добавлено целей: ${r.added}`); route();
     } catch (err) { toast(err.message, "error"); e.target.disabled = false; }
   };
-
   v.querySelectorAll("[data-offer]").forEach(b => {
     b.onclick = () => {
       window.selectedOfferTargetId = +b.dataset.offer;
@@ -2218,6 +2368,9 @@ async function viewTargets(v) {
   });
   v.querySelectorAll("[data-preview]").forEach(b => {
     b.onclick = () => openTargetQuickModal(+b.dataset.preview);
+  });
+  v.querySelectorAll("[data-drip]").forEach(b => {
+    b.onclick = () => openDripModal(+b.dataset.drip);
   });
 }
 
@@ -2298,6 +2451,83 @@ async function openTargetQuickModal(id) {
   };
 
   refreshPreview();
+}
+
+// Drip modal — 5 касаний 0/48/96/168/240ч, воркер сам ставит в очередь по due_at
+async function openDripModal(targetId) {
+  let bodies = [];
+  let withLink = false;
+  async function loadSequences() {
+    try { return (await api.get(`/api/sequences?target_id=${targetId}`)).items || []; } catch(_) { return []; }
+  }
+  let seqs = await loadSequences();
+  const tpls = (await api.get("/api/templates")).items;
+  const tplOpts = tpls.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join("");
+  function renderTimeline(items) {
+    if (!items.length) return `<div class="dim" style="padding:12px;text-align:center">Цепочка пуста — создайте 2-5 касаний ниже.</div>`;
+    return `<div class="seq-timeline">${items.map(s => `
+      <div class="seq-step ${esc(s.status)}">
+        <div class="seq-step-num">${s.step}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:12px;display:flex;gap:8px;align-items:center"><span>Шаг ${s.step}</span><span class="tag s-${esc(s.status)}">${esc(s.status)}</span><span class="dim mono">${esc(s.due_at||'')}</span> ${s.status==='pending'?`<button class="btn btn-secondary btn-sm" data-cancel-seq="${s.id}">Отменить</button>`:''}</div>
+          <div style="white-space:pre-wrap;font-size:13px;margin-top:6px">${esc(s.body||'')}</div>
+        </div>
+      </div>`).join("")}</div>`;
+  }
+  modal(`Drip-цепочка #${targetId}`,
+    `<div id="dripTimeline">${renderTimeline(seqs)}</div>
+     <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+       <div class="dim" style="margin-bottom:8px;font-size:12.5px">Новые касания (каждое — отдельный текст; задержки по умолчанию 0, 48, 96, 168, 240 ч):</div>
+       <div id="dripInputs" style="display:flex;flex-direction:column;gap:8px"></div>
+       <div class="row" style="margin-top:8px">
+         <select id="dripTpl"><option value="">Шаблон...</option>${tplOpts}</select>
+         <button class="btn btn-secondary btn-sm" id="btnDripAddTpl">Добавить из шаблона</button>
+         <button class="btn btn-secondary btn-sm" id="btnDripAddEmpty">Добавить пустой</button>
+         <label class="dim" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="dripWithLink"> со ссылкой</label>
+       </div>
+       <div class="row" style="margin-top:10px">
+         <input id="dripDelays" value="0,48,96,168,240" style="flex:1" placeholder="Задержки часов, через запятую">
+         <button class="btn btn-primary" id="btnDripCreate">Создать цепочку</button>
+       </div>
+       <div class="dim" style="font-size:11px;margin-top:6px">Первый шаг сразу queued и воркер поставит в очередь; pending уйдут по due_at. При replied/refused/blocked pending отменяются автоматом.</div>
+     </div>
+    `,
+    `<button class="btn btn-secondary" onclick="closeModal()">Закрыть</button>`
+  );
+  const inputs = document.getElementById("dripInputs");
+  function addInput(val="") {
+    const w = document.createElement("div");
+    w.style.display="flex"; w.style.gap="8px";
+    w.innerHTML = `<textarea placeholder="Текст касания..." style="flex:1;min-height:60px">${esc(val)}</textarea><button class="btn btn-secondary btn-sm" title="Удалить">&#x2715;</button>`;
+    w.querySelector("button").onclick = () => w.remove();
+    inputs.appendChild(w);
+  }
+  addInput(""); addInput("");
+  document.getElementById("btnDripAddEmpty").onclick = () => addInput("");
+  document.getElementById("btnDripAddTpl").onclick = () => {
+    const sel = document.getElementById("dripTpl").value;
+    const found = tpls.find(x => String(x.id)===String(sel));
+    if (found) addInput(found.body);
+  };
+  document.getElementById("btnDripCreate").onclick = async e => {
+    const txts = [...inputs.querySelectorAll("textarea")].map(x=>x.value.trim()).filter(Boolean);
+    if (!txts.length) { toast("Добавьте хотя бы одно касание","error"); return; }
+    const delays = document.getElementById("dripDelays").value.split(",").map(s=>parseInt(s.trim(),10)).filter(n=>Number.isFinite(n));
+    e.target.disabled=true;
+    try {
+      const r = await api.send("/api/sequences", { target_id: targetId, bodies: txts, delays_hours: delays, with_link: document.getElementById("dripWithLink").checked });
+      toast(`Цепочка создана: ${r.ids.length} шагов`);
+      const updated = await loadSequences();
+      document.getElementById("dripTimeline").innerHTML = renderTimeline(updated);
+      updated.filter(s=>s.status==='pending').forEach(s=>{
+        const b = document.querySelector(`[data-cancel-seq="${s.id}"]`);
+        if(b) b.onclick = async()=>{ await api.send(`/api/sequences/${s.id}/cancel`,{}, "POST"); toast("Шаг отменён"); document.getElementById("dripTimeline").innerHTML = renderTimeline(await loadSequences()); };
+      });
+    } catch(err){ toast(err.message,"error"); e.target.disabled=false; return; }
+    e.target.disabled=false;
+  };
+  // wire cancel on existing pending
+  document.querySelectorAll("[data-cancel-seq]").forEach(b=> b.onclick = async()=>{ await api.send(`/api/sequences/${b.dataset.cancelSeq}`,{}, "POST"); toast("Шаг отменён"); document.getElementById("dripTimeline").innerHTML = renderTimeline(await loadSequences()); });
 }
 
 // --------------------------------------------------------------------------
