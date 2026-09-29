@@ -24,6 +24,12 @@ import pathlib
 import random
 import sys
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv()
+load_dotenv("crm.env")
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
@@ -32,7 +38,10 @@ from crm import db as crm_db
 
 log = logging.getLogger("crm.sender")
 
-SESSION = os.environ.get("TG_SESSION_FILE", "/root/.hermes/telethon_vibecoders")
+SESSION = os.environ.get(
+    "CRM_TELETHON_SESSION",
+    os.environ.get("TG_SESSION_FILE", str(Path.home() / ".hermes" / "telethon_vibecoders")),
+)
 API_ID = int(os.environ.get("TG_API_ID", "0"))
 API_HASH = os.environ.get("TG_API_HASH", "")
 

@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS organizations (
 
 CREATE INDEX IF NOT EXISTS idx_org_id ON organizations(org_id);
 CREATE INDEX IF NOT EXISTS idx_session_niche ON scrape_sessions(niche);
+CREATE INDEX IF NOT EXISTS idx_org_phone ON organizations(phone);
 
 CREATE TABLE IF NOT EXISTS seen_orders (
     uid         TEXT PRIMARY KEY,
@@ -38,6 +39,8 @@ CREATE TABLE IF NOT EXISTS seen_orders (
     matched     INTEGER NOT NULL DEFAULT 0,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE INDEX IF NOT EXISTS idx_seen_matched ON seen_orders(matched);
 
 CREATE TABLE IF NOT EXISTS chat_settings (
     chat_id     INTEGER NOT NULL,
@@ -101,11 +104,16 @@ class Database:
 
     async def connect(self) -> None:
         db = await aiosqlite.connect(self.path)
-        await db.execute("PRAGMA journal_mode=WAL")
-        await db.executescript(_SCHEMA)
-        self._db = db
-        await self._migrate()
-        await self._conn.commit()
+        try:
+            await db.execute("PRAGMA journal_mode=WAL")
+            await db.execute("PRAGMA foreign_keys=ON")
+            await db.executescript(_SCHEMA)
+            self._db = db
+            await self._migrate()
+            await self._conn.commit()
+        except Exception:
+            await db.close()
+            raise
 
     async def _migrate(self) -> None:
         db = self._conn
@@ -118,6 +126,8 @@ class Database:
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_session_niche_city ON scrape_sessions(niche, city)"
         )
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_org_phone ON organizations(phone)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_seen_matched ON seen_orders(matched)")
 
     async def close(self) -> None:
         if self._db:
@@ -157,9 +167,10 @@ class Database:
         cur = await self._conn.execute(sql, params)
         keys = set()
         for (phone,) in await cur.fetchall():
-            digits = "".join(ch for ch in phone.split(",")[0] if ch.isdigit())
-            if len(digits) >= 10:
-                keys.add(digits[-10:])
+            for part in phone.split(","):
+                digits = "".join(ch for ch in part if ch.isdigit())
+                if len(digits) >= 10:
+                    keys.add(digits[-10:])
         return keys
 
     async def save_session(

@@ -36,11 +36,19 @@ _poll_tasks: dict[int, asyncio.Task] = {}
 def _spawn_poll(chat_id: int, coro) -> None:
     prev = _poll_tasks.get(chat_id)
     if prev and not prev.done():
-        coro.close()
+        try:
+            coro.close()
+        except Exception:
+            pass
+        log.debug("poll busy for %s — skip", chat_id)
         return
     task = asyncio.create_task(coro)
     _poll_tasks[chat_id] = task
-    task.add_done_callback(lambda _t: _poll_tasks.pop(chat_id, None))
+    def _cleanup(t: asyncio.Task, cid: int = chat_id, tsk: asyncio.Task = task) -> None:
+        if _poll_tasks.get(cid) is tsk:
+            _poll_tasks.pop(cid, None)
+
+    task.add_done_callback(_cleanup)
 
 
 async def _first_poll(chat_id: int, orders_service: OrdersService) -> None:

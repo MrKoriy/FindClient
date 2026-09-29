@@ -38,7 +38,7 @@ DEFAULT_KEYWORDS = (
 )
 # In descriptions a bare "сайт" is too common, so require an explicit request.
 _DESC_RE = re.compile(
-    r"(созда|разработ|сдела|собра|сверста|переделa|переделать|редизайн|нуж[ен]|требуется|ищу|заказать)"
+    r"(созда|разработ|сдела|собра|сверста|передела|переделать|редизайн|нуж[ен]|требуется|ищу|заказать)"
     r"\w*\s+(?:\S+\s+){0,3}?(сайт|лендинг|landing|интернет[- ]магазин)"
     r"|\b(tilda|тильд\w*|wordpress|битрикс|bitrix|webflow|лендинг\w*)\b",
     re.I,
@@ -91,9 +91,19 @@ def parse_kwork_wants(wants: list[dict]) -> list[Order]:
         possible = w.get("possiblePriceLimit") or ""
         budget = ""
         if price:
-            budget = f"до {float(price):,.0f} ₽".replace(",", " ")
-            if possible and float(possible) > float(price):
-                budget += f" (допустимо {float(possible):,.0f} ₽)".replace(",", " ")
+            try:
+                pv = float(price)
+            except (TypeError, ValueError):
+                pv = None
+            if pv is not None:
+                budget = f"до {pv:,.0f} ₽".replace(",", " ")
+                if possible:
+                    try:
+                        ppv = float(possible)
+                    except (TypeError, ValueError):
+                        ppv = None
+                    if ppv is not None and ppv > pv:
+                        budget += f" (допустимо {ppv:,.0f} ₽)".replace(",", " ")
         orders.append(Order(
             source="kwork",
             id=wid,

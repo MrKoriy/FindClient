@@ -20,7 +20,7 @@ router = Router()
 COUNTS = (25, 50, 100, 200, 500)
 DEFAULTS = {
     "city": "Москва", "count": 50, "sources": ["2gis", "yandex"],
-    "no_site": True, "phone": True, "fmt": "xlsx",
+    "no_site": True, "phone": True, "fmt": "xlsx", "egrul": False,
 }
 
 
@@ -53,6 +53,7 @@ def _options_text(d: dict) -> str:
         f"Источники: {src}\n"
         f"Только без сайта: {'да' if d['no_site'] else 'нет'}\n"
         f"Только с телефоном: {'да' if d['phone'] else 'нет'}\n"
+        f"ЕГРЮЛ (директор/ИНН): {'да' if d['egrul'] else 'нет'}\n"
         f"Количество: {d['count']}\n"
         f"Формат: {d['fmt'].upper()}\n\n"
         "Уже собранные ранее компании автоматически пропускаются."
@@ -65,6 +66,7 @@ def _options_kb(d: dict):
          (f"{check('yandex' in d['sources'])} Яндекс Карты", "sc:opt:yandex")],
         [(f"{check(d['no_site'])} Без сайта", "sc:opt:nosite"),
          (f"{check(d['phone'])} С телефоном", "sc:opt:phone")],
+        [(f"{check(d['egrul'])} ЕГРЮЛ", "sc:opt:egrul")],
         [(f"🔢 {d['count']} шт.", "sc:opt:count"), ("✏️ Своё число", "sc:opt:countin"),
          (f"📄 {d['fmt'].upper()}", "sc:opt:fmt")],
         [(f"🏙 Город: {d['city']}", "sc:opt:city")],
@@ -179,8 +181,14 @@ async def on_option(callback: CallbackQuery, state: FSMContext) -> None:
         d["no_site"] = not d["no_site"]
     elif opt == "phone":
         d["phone"] = not d["phone"]
+    elif opt == "egrul":
+        d["egrul"] = not d["egrul"]
     elif opt == "count":
-        d["count"] = COUNTS[(COUNTS.index(d["count"]) + 1) % len(COUNTS)] if d["count"] in COUNTS else COUNTS[0]
+        if d["count"] in COUNTS:
+            d["count"] = COUNTS[(COUNTS.index(d["count"]) + 1) % len(COUNTS)]
+        else:
+            nxt = next((c for c in COUNTS if c > d["count"]), COUNTS[0])
+            d["count"] = nxt
     elif opt == "countin":
         await state.set_state(ScrapeStates.entering_count)
         await safe_edit(callback, "Сколько компаний собрать? (1–1000)")
@@ -279,7 +287,7 @@ async def on_go(callback: CallbackQuery, state: FSMContext, scrape_service: Scra
     req = ScrapeRequest(
         queries=tuple(d["queries"]), city=d["city"], count=d["count"], sources=tuple(d["sources"]),
         only_without_site=d["no_site"], only_with_phone=d["phone"], label=d["label"],
-        enrich_egrul=True,
+        enrich_egrul=d["egrul"],
     )
     try:
         await callback.message.edit_reply_markup(reply_markup=None)
@@ -297,7 +305,7 @@ async def cmd_find(message: Message, command: CommandObject, scrape_service: Scr
         await message.answer(
             "Быстрый поиск: <code>/find стоматология | Казань | 100</code>\n"
             "По умолчанию: Москва, 50 шт., только без сайта и с телефоном, 2GIS + Яндекс.\n"
-            "Добавьте <code>| все</code>, чтобы не фильтровать по сайту.",
+            "Добавьте <code>| все</code>, чтобы не фильтровать по сайту, и <code>| егрюл</code> для ЕГРЮЛ.",
             parse_mode="HTML",
         )
         return
@@ -306,8 +314,9 @@ async def cmd_find(message: Message, command: CommandObject, scrape_service: Scr
     city = parts[1] if len(parts) > 1 and parts[1] else "Москва"
     count = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 50
     all_sites = any(p.lower() in ("все", "all") for p in parts[1:])
+    enrich = any(p.lower() in ("егрюл", "egrul") for p in parts[1:])
     req = ScrapeRequest(
         queries=queries, city=city, count=min(count, 1000),
-        only_without_site=not all_sites, only_with_phone=True, enrich_egrul=True,
+        only_without_site=not all_sites, only_with_phone=True, enrich_egrul=enrich,
     )
     await run_search(message, req, "xlsx", scrape_service)

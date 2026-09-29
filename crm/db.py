@@ -240,18 +240,20 @@ def _read_organizations(scraper_db: str) -> list[sqlite3.Row]:
     после апгрейда, её может не быть - читаем без неё.
     """
     src = sqlite3.connect(scraper_db)
-    src.row_factory = sqlite3.Row
-    cur = src.execute("PRAGMA table_info(organizations)")
-    has_director = any(r[1] == "director" for r in cur.fetchall())
-    select = (
-        "SELECT org_id, session_id, name, phone, email, website, socials, address,"
-        " city, category, rating, reviews, source"
-    )
-    if has_director:
-        select += ", director"
-    rows = src.execute(f"{select} FROM organizations").fetchall()
-    src.close()
-    return rows
+    try:
+        src.row_factory = sqlite3.Row
+        cur = src.execute("PRAGMA table_info(organizations)")
+        has_director = any(r[1] == "director" for r in cur.fetchall())
+        select = (
+            "SELECT org_id, session_id, name, phone, email, website, socials, address,"
+            " city, category, rating, reviews, source"
+        )
+        if has_director:
+            select += ", director"
+        rows = src.execute(f"{select} FROM organizations").fetchall()
+        return rows
+    finally:
+        src.close()
 
 
 async def import_targets(scraper_db: str | None = None, crm_db: str | None = None) -> int:

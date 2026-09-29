@@ -144,6 +144,7 @@ class YandexMapsClient:
         elif CurlSession is not None:
             pages = self._web_pages_curl(text, city)
         else:
+            log.warning("curl_cffi не установлен — Яндекс ограничен первой страницей (25 результатов)")
             pages = self._web_first_page_aiohttp(text, city)
 
         skip_ids = skip_ids or set()

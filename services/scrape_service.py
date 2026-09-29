@@ -116,11 +116,19 @@ def merge_organizations(orgs: list[Organization]) -> tuple[list[Organization], i
     by_key: dict[str, Organization] = {}
     merged = 0
     for org in orgs:
-        keys = [f"id:{org.id}"]
-        if pk := phone_key(org.phone):
-            keys.append(f"ph:{pk}")
-        keys.append(f"nm:{name_key(org.name, org.address.split(',')[0])}")
-        existing = next((by_key[k] for k in keys if k in by_key), None)
+        pk = phone_key(org.phone)
+        nm_key = f"nm:{name_key(org.name, org.address.split(',')[0])}"
+        # ищем по id и phone — всегда надёжно
+        existing = by_key.get(f"id:{org.id}")
+        if not existing and pk:
+            existing = by_key.get(f"ph:{pk}")
+        if not existing:
+            # по имени — только если телефон тоже совпадает (или один из них пустой)
+            cand = by_key.get(nm_key)
+            if cand:
+                cand_pk = phone_key(cand.phone)
+                if not pk or not cand_pk or pk == cand_pk:
+                    existing = cand
         if existing:
             _merge_into(existing, org)
             merged += 1
@@ -128,8 +136,12 @@ def merge_organizations(orgs: list[Organization]) -> tuple[list[Organization], i
         else:
             unique.append(org)
             target = org
-        for k in keys:
-            by_key.setdefault(k, target)
+        # регистрируем ключи
+        by_key[f"id:{org.id}"] = target
+        if pk:
+            by_key[f"ph:{pk}"] = target
+        # nm ключ — только если ещё не занят (не перетираем чужой)
+        by_key.setdefault(nm_key, target)
     return unique, merged
 
 
@@ -241,12 +253,31 @@ class ScrapeService:
 
         timeout = aiohttp.ClientTimeout(total=60)
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            results = await asyncio.gather(*(collect(s) for s in req.sources))
-        for source, (got, err) in zip(req.sources, results, strict=True):
+            results = await asyncio.gather(*(collect(s) for s in req.sources), return_exceptions=True)
+        for source, result in zip(req.sources, results, strict=True):
+            if isinstance(result, BaseException):
+                log.exception("%s gather failed", source)
+                errors.append(f"{SOURCE_LABELS.get(source, source)}: {result}")
+                per_source[source] = 0
+                continue
+            got, err = result  # type: ignore[misc]
             per_source[source] = len(got)
             found += got
             if err:
                 errors.append(err)
+
+        # Yandex keyless fallback without curl_cffi is limited to 25 results — warn user
+        if "yandex" in req.sources and not self.yandex_api_key:
+            try:
+                from api.yandex_client import CurlSession as _YandexCurl  # type: ignore[import]
+
+                if _YandexCurl is None:
+                    warn = "Яндекс Карты: curl_cffi не установлен — ограничен первой страницей (25 результатов)"
+                    if warn not in errors:
+                        log.warning(warn)
+                        errors.append(warn)
+            except Exception:
+                pass
 
         total_scraped = len(found)
         unique, merged = merge_organizations(found)

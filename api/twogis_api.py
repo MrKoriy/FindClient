@@ -156,6 +156,8 @@ class TwoGISApi:
     # доступна всему процессу, либо фильтруется всему процессу.
     # None = direct route untried, False = it is filtered, so stop paying for it.
     _direct_ok: bool | None = None
+    _direct_ok_until: float = 0.0  # timestamp когда истекает кеш
+    _DIRECT_TTL = 600.0  # 10 минут
 
     def __init__(
         self,
@@ -205,6 +207,8 @@ class TwoGISApi:
     @staticmethod
     def _routes() -> tuple[bool, ...]:
         """Direct first while the network allows it, edge-only once direct has failed."""
+        if TwoGISApi._direct_ok is False and time.time() > TwoGISApi._direct_ok_until:
+            TwoGISApi._direct_ok = None
         return (True,) if TwoGISApi._direct_ok is False else (False, True)
 
     async def _fetch(self, path: str, params: dict[str, Any], headers: dict[str, str]) -> dict:
@@ -215,11 +219,13 @@ class TwoGISApi:
                     data = await r.json(content_type=None)
                 if not via_edge:
                     TwoGISApi._direct_ok = True
+                    TwoGISApi._direct_ok_until = 0.0
                 return data
             except (TimeoutError, aiohttp.ClientError, ValueError) as exc:
                 last = exc
                 if not via_edge:
                     TwoGISApi._direct_ok = False
+                    TwoGISApi._direct_ok_until = time.time() + TwoGISApi._DIRECT_TTL
                 log.debug("2GIS %s (%s) недоступен: %s",
                           path, "edge" if via_edge else "direct", exc)
         raise last or TwoGISError(f"2GIS API {path} недоступен")

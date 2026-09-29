@@ -103,29 +103,41 @@ class TwoGISClient:
 
         organizations = organizations[:count]
 
-        # Enrich each org with contacts from firm pages
-        for i, org in enumerate(organizations):
-            if not org.phone and not org.email and not org.website:
-                contacts = await self._fetch_contacts_from_web(org.id)
-                if contacts:
-                    org.phone = contacts["phone"]
-                    org.email = contacts["email"]
-                    org.website = contacts["website"]
-                    org.socials = contacts["socials"]
-                org.city = self.city_name
-                org.url = _FIRM_URL.format(city=self.city_slug, org_id=org.id)
-                org.score = lead_score(
-                    has_website=org.has_website, phone=org.phone, reviews=org.reviews,
-                    branches=org.branches, rating=org.rating,
-                )
-                if self.request_delay > 0:
-                    await asyncio.sleep(self._jittered_delay())
-
-            if on_progress and (i + 1) % 5 == 0:
-                await on_progress(i + 1, len(organizations))
-
+        # Фильтрация ДО обогащения — экономим запросы на firm pages
         if skip_ids:
             organizations = [o for o in organizations if o.id not in skip_ids]
+        if only_without_site:
+            # до обогащения отбрасываем тех, у кого сайт уже известен;
+            # после обогащения отфильтруем повторно (сайт мог появиться)
+            organizations = [o for o in organizations if not o.has_website]
+
+        # Параллельное обогащение контактами
+        needing = [org for org in organizations if not org.phone and not org.email and not org.website]
+        if needing:
+            sem = asyncio.Semaphore(6)
+            done = 0
+
+            async def _enrich_one(org: Organization) -> None:
+                nonlocal done
+                async with sem:
+                    contacts = await self._fetch_contacts_from_web(org.id)
+                    if contacts:
+                        org.phone = contacts["phone"]
+                        org.email = contacts["email"]
+                        org.website = contacts["website"]
+                        org.socials = contacts["socials"]
+                    org.city = self.city_name
+                    org.url = _FIRM_URL.format(city=self.city_slug, org_id=org.id)
+                    org.score = lead_score(
+                        has_website=org.has_website, phone=org.phone, reviews=org.reviews,
+                        branches=org.branches, rating=org.rating,
+                    )
+                done += 1
+                if on_progress and (done % 5 == 0 or done == len(needing)):
+                    await on_progress(done, len(organizations))
+
+            await asyncio.gather(*(_enrich_one(org) for org in needing))
+
         if only_without_site:
             organizations = [o for o in organizations if not o.has_website]
         return organizations[:count]
@@ -269,7 +281,7 @@ def _parse_search_profiles(state: dict[str, Any]) -> list[Organization]:
         if not isinstance(data, dict):
             continue
 
-        name = data.get("name_ex", {}).get("primary", "") or data.get("name", "")
+        name = (data.get("name_ex") or {}).get("primary", "") or data.get("name", "")
         address = data.get("address_name", "")
         reviews = data.get("reviews") or {}
         rating = reviews.get("general_rating") or 0.0

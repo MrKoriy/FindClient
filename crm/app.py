@@ -139,7 +139,7 @@ async def handle_auth(request: web.Request) -> web.Response:
         return web.Response(status=403, text="Недействительный или истекший токен авторизации")
 
     target = request.query.get("redirect", "/")
-    if not target.startswith("/"):
+    if not target.startswith("/") or target.startswith("//"):
         target = "/"
 
     resp = web.HTTPFound(target)

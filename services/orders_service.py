@@ -111,12 +111,14 @@ class OrdersService:
         sent: dict[int, list[Order]] = {}
         matched_uids: set[str] = set()
         delivered_uids: set[str] = set()
+        truncated_uids: set[str] = set()
         for chat_id, cfg in configs.items():
             hits = [
                 o for o in new_orders
                 if self._source_key(o) in cfg["sources"] and matches(o, cfg["keywords"], cfg["minus"])
             ]
-            if first_run:
+            if first_run and len(hits) > _FIRST_RUN_LIMIT:
+                truncated_uids.update(o.uid for o in hits[_FIRST_RUN_LIMIT:])
                 hits = hits[:_FIRST_RUN_LIMIT]
             sent[chat_id] = hits
             matched_uids.update(o.uid for o in hits)
@@ -129,14 +131,15 @@ class OrdersService:
                         log.warning("send to %s failed: %s", chat_id, exc)
                     await asyncio.sleep(0.05)
 
-        # Провалившаяся доставка не «съедает» заказ: uid остаётся непросмотренным
-        # и уйдёт подписчикам в следующем опросе. Помечаем доставленное и всё,
-        # что никому не подошло (matched=False, ретраить незачем).
+        # Провалившаяся доставка и обрезанные first_run хиты не «съедают» заказ:
+        # uid остаётся непросмотренным и уйдёт в следующем опросе.
+        # Помечаем только доставленное и всё, что никому не подошло.
         await self.db.mark_orders_seen([
             {"uid": o.uid, "source": o.source, "title": o.title, "url": o.url,
              "budget": o.budget, "matched": o.uid in matched_uids}
             for o in new_orders
-            if o.uid in delivered_uids or o.uid not in matched_uids
+            if (o.uid in delivered_uids or o.uid not in matched_uids)
+            and o.uid not in truncated_uids
         ])
         return sent
 
