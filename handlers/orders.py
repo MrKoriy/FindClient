@@ -243,7 +243,8 @@ async def _run_manual_check(chat_id: int, status: Message, orders_service: Order
 @router.callback_query(F.data == "or:llm")
 async def on_llm(callback: CallbackQuery, db: Database, orders_service: OrdersService) -> None:
     try:
-        from crm.db import get_settings as _gs, set_settings as _ss  # type: ignore
+        from crm.db import get_settings as _gs  # type: ignore
+        from crm.db import set_settings as _ss  # type: ignore
 
         s = await _gs()
         new_val = "0" if s.get("orders_llm_rerank") == "1" else "1"

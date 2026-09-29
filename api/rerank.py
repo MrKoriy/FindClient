@@ -31,20 +31,28 @@ from models.order import Order
 log = logging.getLogger(__name__)
 
 # Cheap pre-filter: must mention site-ish token anywhere to warrant LLM.
-_SITE_LIKE_RE = re.compile(r"сайт|лендинг|landing|интернет[-\s]?магазин|tilda|тильд|wordpress|битрикс|bitrix|веб-?сайт|одностранич|многостранич", re.I)
+_SITE_LIKE_RE = re.compile(
+    r"сайт|лендинг|landing|интернет[-\s]?магазин|tilda|тильд|"
+    r"wordpress|битрикс|bitrix|веб-?сайт|одностранич|многостранич",
+    re.I,
+)
 _BUDGET_RE = re.compile(r"(\d[\d\s]*)\s*(?:₽|руб|р\.|k\b|к\b|тыс)", re.I)
 
 # Hard-rejects that never go to LLM.
 _HARD_REJECT_RE = re.compile(
-    r"ваканси[яюи]|в\s+штат|оклад|з/?п\b|зарплат|полная занятость|ищу\s+работ[уа]|предлагаю\s+услуги|без\s+опыта|#резюме|резюме|делаю\s+сайты|создаю\s+сайты",
+    r"ваканси[яюи]|в\s+штат|оклад|з/?п\b|зарплат|полная занятость|"
+    r"ищу\s+работ[уа]|предлагаю\s+услуги|без\s+опыта|#резюме|резюме|"
+    r"делаю\s+сайты|создаю\s+сайты",
     re.I,
 )
 
 SYSTEM_RERANKER = """Ты — классификатор заказов на создание сайта.
 Вход: заголовок и описание заказа (рус). Выход строго JSON.
-Критерий релевантности: заказчик ПРОСИТ СДЕЛАТЬ сайт/лендинг/интернет-магазин/квиз/переверстать сайт.
-НЕ релевантно: вакансия в штат, ищу работу, предлагаю свои услуги, мнение о сайте, тексты/SEO/дизайн без создания сайта, правки ≤ 2 часов.
-Верни JSON: {"relevant": true|false, "score": 0..100, "reason": "коротко почему", "budget_rub": null|int, "deadline": null|string, "stack": null|string}
+Критерий релевантности: заказчик ПРОСИТ СДЕЛАТЬ сайт/лендинг/интернет-магазин/квиз/переверстать.
+НЕ релевантно: вакансия/штат, ищу работу, предлагаю услуги, мнение о сайте,
+тексты/SEO/дизайн без создания сайта, правки ≤ 2 часов.
+Верни JSON: {"relevant": bool, "score": 0..100, "reason": "коротко почему",
+  "budget_rub": null|int, "deadline": null|string, "stack": null|string}
 Бюджет: вытяни из текста (₽/руб/k/тыс). Score: 90+ горячий, 60+ релевант, <40 шум.
 Отвечай только JSON, без markdown.
 """
@@ -53,12 +61,18 @@ FEW_SHOTS: list[dict[str, str]] = [
     {
         "title": "Нужно создать сайт-визитку для стоматологии",
         "description": "Нужен сайт 5 страниц, Tilda, бюджет 40 000 ₽. Срок 7 дней.",
-        "want": '{"relevant": true, "score": 92, "reason": "прямой запрос на сайт-визитку, бюджет и срок", "budget_rub": 40000, "deadline": "7 дней", "stack": "Tilda"}',
+        "want": (
+            '{"relevant": true, "score": 92, "reason": "прямой запрос на сайт-визитку", '
+            '"budget_rub": 40000, "deadline": "7 дней", "stack": "Tilda"}'
+        ),
     },
     {
         "title": "Вакансия: верстальщик в штат",
         "description": "Ищу верстальщика на постоянку, оклад 80к, удалёнка",
-        "want": '{"relevant": false, "score": 5, "reason": "вакансия в штат, не проект", "budget_rub": null, "deadline": null, "stack": null}',
+        "want": (
+            '{"relevant": false, "score": 5, "reason": "вакансия в штат, не проект", '
+            '"budget_rub": null, "deadline": null, "stack": null}'
+        ),
     },
 ]
 
@@ -67,7 +81,9 @@ _LLM_RETRIES = 1
 _BATCH = 10
 
 
-def _heuristic_score(order: Order, keywords: tuple[str, ...], minus: tuple[str, ...]) -> tuple[bool, int, str, int | None]:
+def _heuristic_score(  # noqa: PLR0911
+    order: Order, keywords: tuple[str, ...], minus: tuple[str, ...],
+) -> tuple[bool, int, str, int | None]:
     """Return (relevant, score, reason, budget) via heuristics only."""
     relevant = heuristic_matches(order, keywords, minus)
     title = order.title.lower()
@@ -109,7 +125,13 @@ def _extract_budget(text: str) -> int | None:
     return None
 
 
-def _should_call_llm(order: Order, keywords: tuple[str, ...], minus: tuple[str, ...], heur_relevant: bool, heur_score: int) -> bool:
+def _should_call_llm(  # noqa: PLR0913
+    order: Order,
+    keywords: tuple[str, ...],
+    minus: tuple[str, ...],
+    heur_relevant: bool,
+    heur_score: int,
+) -> bool:
     text = f"{order.title}\n{order.description}".lower()
     if _HARD_REJECT_RE.search(text):
         return False
@@ -235,10 +257,10 @@ async def score_orders_llm(
     batches = [to_llm[i: i + _BATCH] for i in range(0, len(to_llm), _BATCH)]
     results = await asyncio.gather(*(_call_llm_batch(b, bk, bu, bm) for b in batches), return_exceptions=True)
 
-    for batch, res in zip(batches, results):
+    for batch, res in zip(batches, results, strict=False):
         if isinstance(res, BaseException) or not res:
             continue
-        for order, llm_meta in zip(batch, res):
+        for order, llm_meta in zip(batch, res, strict=False):
             if not isinstance(llm_meta, dict):
                 continue
             rel = llm_meta.get("relevant")
