@@ -37,6 +37,10 @@ class Settings:
     YANDEX_PROXY_POOL: str = ""
     # База CRM-панели для кнопки /crm: куда вести юзера за одноразовым токеном.
     CRM_URL: str = "https://94-103-1-126.sslip.io:9444"
+    ORDERS_LLM_RERANK: bool = False
+    BAI_API_KEY: str = ""
+    BAI_BASE_URL: str = "https://api.b.ai/v1"
+    BAI_MODEL: str = "qwen3.8-flash"
 
     @property
     def proxy_pool(self) -> list[str]:
@@ -78,4 +82,8 @@ class Settings:
             HTTP_PROXY_POOL=env("HTTP_PROXY_POOL", "").strip(),
             YANDEX_PROXY_POOL=env("YANDEX_PROXY_POOL", "").strip(),
             CRM_URL=env("CRM_URL", "").strip() or "https://94-103-1-126.sslip.io:9444",
+            ORDERS_LLM_RERANK=env("ORDERS_LLM_RERANK", "").strip() in ("1", "true", "True"),
+            BAI_API_KEY=env("BAI_API_KEY", "").strip(),
+            BAI_BASE_URL=env("BAI_BASE_URL", "https://api.b.ai/v1").strip() or "https://api.b.ai/v1",
+            BAI_MODEL=env("BAI_MODEL", "qwen3.8-flash").strip() or "qwen3.8-flash",
         )

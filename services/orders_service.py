@@ -18,6 +18,11 @@ from api.orders import (
 from db.database import Database
 from models.order import Order
 
+try:
+    from api.rerank import rerank_orders  # type: ignore
+except ImportError:  # pragma: no cover
+    rerank_orders = None  # type: ignore
+
 log = logging.getLogger(__name__)
 
 # Per-chat settings keys.
@@ -53,11 +58,19 @@ class OrdersService:
         sender: Sender | None = None,
         interval: int = 300,
         tg_groups_fetcher: Fetcher | None = None,
+        llm_rerank: bool = False,
+        bai_api_key: str = "",
+        bai_base_url: str = "",
+        bai_model: str = "",
     ) -> None:
         self.db = db
         self.sender = sender
         self.interval = max(60, interval)
         self.tg_groups_fetcher = tg_groups_fetcher
+        self.llm_rerank = llm_rerank
+        self.bai_api_key = bai_api_key
+        self.bai_base_url = bai_base_url
+        self.bai_model = bai_model
         self.last_errors: dict[str, str] = {}
         self._task: asyncio.Task | None = None
 
@@ -108,15 +121,81 @@ class OrdersService:
         new_uids = await self.db.filter_new_order_uids(list(by_uid))
         new_orders = [by_uid[u] for u in by_uid if u in new_uids]
 
+        # optional LLM rerank — fall back to CRM B.AI settings if bot env key empty
+        bai_key = self.bai_api_key
+        bai_url = self.bai_base_url or "https://api.b.ai/v1"
+        bai_model = self.bai_model or "qwen3.8-flash"
+        if self.llm_rerank and not bai_key:
+            try:
+                from crm.db import get_settings as _get_crm_settings  # type: ignore
+
+                crm_s = await _get_crm_settings()
+                if crm_s.get("orders_llm_rerank") == "1" or not self.llm_rerank:
+                    pass  # honour crm flag when env flag off but crm on — handled below
+                if not bai_key:
+                    bai_key = (crm_s.get("bai_api_key") or "").strip()
+                    bai_url = (crm_s.get("bai_base_url") or bai_url).strip()
+                    bai_model = (crm_s.get("bai_model") or bai_model).strip()
+            except Exception:
+                pass
+        use_llm = bool(rerank_orders is not None and bai_key)
+        # also honour per-process CRM flag if env flag was 0 but CRM turned it on
+        if not self.llm_rerank and use_llm:
+            try:
+                from crm.db import get_settings as _get_crm_settings2  # type: ignore
+
+                crm_s2 = await _get_crm_settings2()
+                use_llm = crm_s2.get("orders_llm_rerank") == "1"
+            except Exception:
+                use_llm = False
+        llm_cache: dict[tuple[tuple[str, ...], tuple[str, ...]], dict[str, dict]] = {}
+
+        async def _llm_meta_for(cfg: dict) -> dict[str, dict]:
+            key = (tuple(cfg["keywords"]), tuple(cfg["minus"]))
+            if key in llm_cache:
+                return llm_cache[key]
+            if not use_llm or not new_orders:
+                llm_cache[key] = {}
+                return {}
+            try:
+                scored = await rerank_orders(  # type: ignore
+                    new_orders, tuple(cfg["keywords"]), tuple(cfg["minus"]),
+                    bai_key=bai_key, bai_url=bai_url, bai_model=bai_model,
+                )
+                m = {o.uid: meta for o, meta in scored}
+                llm_cache[key] = m
+                return m
+            except Exception as e:
+                log.debug("llm_rerank failed: %s", e)
+                llm_cache[key] = {}
+                return {}
+
         sent: dict[int, list[Order]] = {}
         matched_uids: set[str] = set()
         delivered_uids: set[str] = set()
         truncated_uids: set[str] = set()
         for chat_id, cfg in configs.items():
-            hits = [
-                o for o in new_orders
-                if self._source_key(o) in cfg["sources"] and matches(o, cfg["keywords"], cfg["minus"])
-            ]
+            # if LLM enabled, rerank then filter by relevant+score threshold
+            if use_llm:
+                llm_map = await _llm_meta_for(cfg)
+                if llm_map:
+                    hits = [
+                        o for o in new_orders
+                        if self._source_key(o) in cfg["sources"]
+                        and llm_map.get(o.uid, {}).get("relevant", matches(o, cfg["keywords"], cfg["minus"]))
+                    ]
+                    # sort hits by llm score desc
+                    hits.sort(key=lambda o: -int(llm_map.get(o.uid, {}).get("score", 0)))
+                else:
+                    hits = [
+                        o for o in new_orders
+                        if self._source_key(o) in cfg["sources"] and matches(o, cfg["keywords"], cfg["minus"])
+                    ]
+            else:
+                hits = [
+                    o for o in new_orders
+                    if self._source_key(o) in cfg["sources"] and matches(o, cfg["keywords"], cfg["minus"])
+                ]
             if first_run and len(hits) > _FIRST_RUN_LIMIT:
                 truncated_uids.update(o.uid for o in hits[_FIRST_RUN_LIMIT:])
                 hits = hits[:_FIRST_RUN_LIMIT]

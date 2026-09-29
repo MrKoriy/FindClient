@@ -66,14 +66,16 @@ async def main() -> None:
     async def send(chat_id: int, text: str) -> None:
         await bot.send_message(chat_id, text, parse_mode="HTML", disable_web_page_preview=True)
 
-    orders_service = OrdersService(
-        db, sender=send, interval=settings.ORDERS_POLL_INTERVAL,
-        tg_groups_fetcher=tg_service.make_site_requests_fetcher(watched_chats) if tg_service.enabled else None,
-    )
     scrape_service = ScrapeService(
         db=db, request_delay=settings.REQUEST_DELAY,
         yandex_api_key=settings.YANDEX_API_KEY, proxy=settings.HTTP_PROXY,
         proxy_pool=settings.proxy_pool,
+    )
+    orders_service = OrdersService(
+        db, sender=send, interval=settings.ORDERS_POLL_INTERVAL,
+        tg_groups_fetcher=tg_service.make_site_requests_fetcher(watched_chats) if tg_service.enabled else None,
+        llm_rerank=bool(settings.ORDERS_LLM_RERANK), bai_api_key=settings.BAI_API_KEY,
+        bai_base_url=settings.BAI_BASE_URL, bai_model=settings.BAI_MODEL,
     )
 
     await bot.set_my_commands(COMMANDS)

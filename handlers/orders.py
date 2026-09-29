@@ -67,10 +67,32 @@ class OrdersStates(StatesGroup):
 async def _panel(chat_id: int, orders_service: OrdersService, db: Database) -> tuple[str, object]:
     cfg = await orders_service.chat_config(chat_id)
     counts = await db.count_orders_by_source()
+    # honour crm flag if env flag off
+    llm_on = bool(getattr(orders_service, "llm_rerank", False))
+    if not llm_on:
+        try:
+            from crm.db import get_settings as _gs  # type: ignore
+
+            _s = await _gs()
+            llm_on = _s.get("orders_llm_rerank") == "1"
+            # also show B.AI key presence
+            _has_key = bool((_s.get("bai_api_key") or "").strip())
+        except Exception:
+            _has_key = False
+    else:
+        try:
+            from crm.db import get_settings as _gs2  # type: ignore
+
+            _s2 = await _gs2()
+            _has_key = bool((_s2.get("bai_api_key") or "").strip())
+        except Exception:
+            _has_key = bool((getattr(orders_service, "bai_api_key", "") or "").strip())
+    llm_line = "LLM-реранкер: " + ("🟢 включён" if llm_on else "⚪️ выкл") + ("" if _has_key else " (нет B.AI ключа)")
     lines = [
         "<b>💼 Автоматический поиск заказов</b>",
         f"Статус: {'🟢 включён' if cfg['enabled'] else '⚪️ выключен'} "
         f"(проверка каждые {orders_service.interval // 60} мин)",
+        llm_line,
         "",
         "Источники: " + ", ".join(ALL_SOURCES[s] for s in cfg["sources"] if s in ALL_SOURCES),
         f"Ключевые слова ({len(cfg['keywords'])}): {html.escape(', '.join(cfg['keywords'][:12]))}"
@@ -85,15 +107,14 @@ async def _panel(chat_id: int, orders_service: OrdersService, db: Database) -> t
     for src, err in orders_service.last_errors.items():
         lines.append(f"⚠️ {src}: {html.escape(err[:120])}")
     lines.append(
-        "\n<i>Avito и Хабр Фриланс автоматически читать нельзя: Хабр закрыт, "
-        "Avito блокирует серверные запросы, а его API не ищет чужие объявления.</i>"
+        "\n<i>Avito услуги теперь как источник карт (не заказов), включает residential proxy.</i>"
     )
     markup = kb([
         [("⏸ Выключить" if cfg["enabled"] else "▶️ Включить", "or:toggle")],
         [(f"{check(s in cfg['sources'])} {label}", f"or:src:{s}") for s, label in list(ALL_SOURCES.items())[:3]],
         [(f"{check(s in cfg['sources'])} {label}", f"or:src:{s}") for s, label in list(ALL_SOURCES.items())[3:]],
         [("🔑 Ключевые слова", "or:kw"), ("🚫 Минус-слова", "or:minus")],
-        [("📣 Telegram-каналы", "or:channels")],
+        [("📣 Telegram-каналы", "or:channels"), (f"{'🟢' if llm_on else '⚪️'} LLM", "or:llm")],
         [("🔄 Проверить сейчас", "or:check"), ("📥 В таблицу", "or:export")],
         BACK_TO_MENU,
     ])
@@ -217,6 +238,25 @@ async def _run_manual_check(chat_id: int, status: Message, orders_service: Order
             await status.edit_text("Не удалось проверить источники — попробуйте позже.")
         except Exception:
             pass
+
+
+@router.callback_query(F.data == "or:llm")
+async def on_llm(callback: CallbackQuery, db: Database, orders_service: OrdersService) -> None:
+    try:
+        from crm.db import get_settings as _gs, set_settings as _ss  # type: ignore
+
+        s = await _gs()
+        new_val = "0" if s.get("orders_llm_rerank") == "1" else "1"
+        await _ss({"orders_llm_rerank": new_val})
+        await callback.answer("LLM: " + ("включён" if new_val == "1" else "выключен"))
+    except Exception as e:
+        await callback.answer(f"Ошибка: {e}", show_alert=True)
+        return
+    text, markup = await _panel(callback.message.chat.id, orders_service, db)
+    try:
+        await callback.message.edit_text(text, reply_markup=markup, parse_mode="HTML", disable_web_page_preview=True)
+    except Exception:
+        await callback.message.answer(text, reply_markup=markup, parse_mode="HTML", disable_web_page_preview=True)
 
 
 @router.callback_query(F.data == "or:check")

@@ -167,6 +167,7 @@ DEFAULT_SETTINGS = {
     "warmup_enabled": "0",          # прогрев аккаунта: лимит растёт первые 14 дней
     "consecutive_floods": "0",      # счётчик флудов подряд (адаптивный throttle)
     "warmup_started_at": "",        # ISO дата первого sent (для warmup)
+    "orders_llm_rerank": "0",       # LLM-реранкер заказов (выкл по умолчанию — нужен BAI ключ)
 }
 
 
