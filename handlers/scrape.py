@@ -61,9 +61,13 @@ def _options_text(d: dict) -> str:
 
 
 def _options_kb(d: dict):
-    return kb([
-        [(f"{check('2gis' in d['sources'])} 2GIS", "sc:opt:2gis"),
-         (f"{check('yandex' in d['sources'])} Яндекс Карты", "sc:opt:yandex")],
+    has_avito = "avito" in d["sources"]
+    # Avito — отдельный ряд: карты + Avito
+    src_row = [(f"{check('2gis' in d['sources'])} 2GIS", "sc:opt:2gis"),
+               (f"{check('yandex' in d['sources'])} Яндекс Карты", "sc:opt:yandex")]
+    # покажем Avito только если город крупный или запрос сервисный — иначе не спамим
+    src_rows = [src_row, [(f"{check(has_avito)} Avito (услуги)", "sc:opt:avito")]]
+    return kb(src_rows + [
         [(f"{check(d['no_site'])} Без сайта", "sc:opt:nosite"),
          (f"{check(d['phone'])} С телефоном", "sc:opt:phone")],
         [(f"{check(d['egrul'])} ЕГРЮЛ", "sc:opt:egrul")],
@@ -173,10 +177,10 @@ async def on_option(callback: CallbackQuery, state: FSMContext) -> None:
     if "queries" not in d:
         await on_menu_scrape(callback, state)
         return
-    if opt in ("2gis", "yandex"):
+    if opt in ("2gis", "yandex", "avito"):
         sources = list(d["sources"])
         sources.remove(opt) if opt in sources else sources.append(opt)
-        d["sources"] = [s for s in ("2gis", "yandex") if s in sources]
+        d["sources"] = [s for s in ("2gis", "yandex", "avito") if s in sources]
     elif opt == "nosite":
         d["no_site"] = not d["no_site"]
     elif opt == "phone":
@@ -305,7 +309,8 @@ async def cmd_find(message: Message, command: CommandObject, scrape_service: Scr
         await message.answer(
             "Быстрый поиск: <code>/find стоматология | Казань | 100</code>\n"
             "По умолчанию: Москва, 50 шт., только без сайта и с телефоном, 2GIS + Яндекс.\n"
-            "Добавьте <code>| все</code>, чтобы не фильтровать по сайту, и <code>| егрюл</code> для ЕГРЮЛ.",
+            "Добавьте <code>| все</code> без фильтра, <code>| егрюл</code> — ЕГРЮЛ, "
+            "<code>| avito</code> — Avito услуги.",
             parse_mode="HTML",
         )
         return
@@ -313,10 +318,13 @@ async def cmd_find(message: Message, command: CommandObject, scrape_service: Scr
     queries = tuple(q.strip() for q in parts[0].split(";") if q.strip())
     city = parts[1] if len(parts) > 1 and parts[1] else "Москва"
     count = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 50
-    all_sites = any(p.lower() in ("все", "all") for p in parts[1:])
-    enrich = any(p.lower() in ("егрюл", "egrul") for p in parts[1:])
+    low_parts = [p.lower() for p in parts[1:]]
+    all_sites = any(p in ("все", "all") for p in low_parts)
+    enrich = any(p in ("егрюл", "egrul") for p in low_parts)
+    use_avito = any(p == "avito" for p in low_parts)
+    sources = ("2gis", "yandex", "avito") if use_avito else ("2gis", "yandex")
     req = ScrapeRequest(
-        queries=queries, city=city, count=min(count, 1000),
+        queries=queries, city=city, count=min(count, 1000), sources=sources,
         only_without_site=not all_sites, only_with_phone=True, enrich_egrul=enrich,
     )
     await run_search(message, req, "xlsx", scrape_service)

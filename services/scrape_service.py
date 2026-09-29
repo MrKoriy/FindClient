@@ -18,7 +18,7 @@ from services.export import ORG_COLUMNS, export_async, to_csv
 
 log = logging.getLogger(__name__)
 
-SOURCE_LABELS = {"2gis": "2GIS", "yandex": "Яндекс Карты"}
+SOURCE_LABELS = {"2gis": "2GIS", "yandex": "Яндекс Карты", "avito": "Avito"}
 
 # Мёртвые точки выкидываем по отзывам: 0-1 отзыв = карточка-зомби. В Москве
 # конкуренция и плотность выше, планка выше.
@@ -175,7 +175,21 @@ class ScrapeService:
         self.bbox_split = bbox_split
         # Ключи 2GIS лежат рядом с базой: рестарт сохраняет рабочий ключ.
         self.creds_path = Path(db.path).parent / "twogis_creds.json"
-        self.searchers = searchers or {"2gis": self._search_2gis, "yandex": self._search_yandex}
+        self.searchers = searchers or {  # noqa: E501
+            "2gis": self._search_2gis, "yandex": self._search_yandex, "avito": self._search_avito,
+        }
+
+    async def _search_avito(self, session, query, req, need, skip, progress) -> list[Organization]:
+        from api.avito_client import AvitoClient
+
+        client = AvitoClient(  # noqa: E501
+            session=session, request_delay=self.request_delay, proxy=self.proxy, proxy_pool=self.proxy_pool,
+        )
+
+        async def on_page(done: int, total: int) -> None:
+            await progress(f"Avito «{query}»: {done}/{total}")
+
+        return await client.search(query, req.city, need, skip_ids=skip, on_progress=on_page)
 
     async def _search_2gis(self, session, query, req, need, skip, progress) -> list[Organization]:
         api = TwoGISApi(
@@ -302,11 +316,15 @@ class ScrapeService:
         if req.only_without_site:
             fresh = [o for o in fresh if not o.has_website]
 
-        # Качество лида: живая точка (отзывы) + достижимый контакт
-        # (мобильный или мессенджер из карточки). Отсекает ~85% мёртвых.
+        # Качество лида: Avito проходит без фильтров (там нет отзывов/рейтинга).
+        def _is_avito(o: Organization) -> bool:
+            return (o.source or "").split("+")[0] == "avito" or o.id.startswith("avito:")
+
         min_reviews = min_reviews_for(req.city)
-        fresh = [o for o in fresh if o.reviews >= min_reviews]
-        fresh = [o for o in fresh if is_mobile_phone(o.phone) or messenger_link(o.socials)]
+        fresh = [o for o in fresh if _is_avito(o) or o.reviews >= min_reviews]
+        fresh = [  # noqa: E501
+            o for o in fresh if _is_avito(o) or is_mobile_phone(o.phone) or messenger_link(o.socials)
+        ]
         # В колонке «Телефон» остаются только мобильные: городские и 8-800
         # для мессенджер-охоты бесполезны.
         for o in fresh:
