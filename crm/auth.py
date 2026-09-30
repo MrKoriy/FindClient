@@ -19,13 +19,19 @@ SESSION_TTL = 30 * 86400  # 30 дней жизни сессионной куки
 
 
 def get_auth_secret() -> str:
-    """Возвращает общий секрет для подписи токенов и сессий."""
-    return (
+    """Возвращает общий секрет для подписи токенов и сессий. Fail-closed в проде."""
+    sec = (
         os.environ.get("CRM_SECRET_KEY")
         or os.environ.get("CRM_PASS")
         or os.environ.get("BOT_TOKEN")
-        or "findclient-fallback-secret-key-2026"
+        or ""
     )
+    if not sec or sec == "findclient-fallback-secret-key-2026":
+        # тестовый прогон: не роняем импорт, используем детерминированный ключ
+        if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("CI") == "true":
+            return "test-secret-key-for-pytest-only-32chars!!"
+        raise RuntimeError("CRM_SECRET_KEY не задан — задайте случайный ключ длиной >=32")
+    return sec
 
 
 def get_owner_ids() -> set[int]:

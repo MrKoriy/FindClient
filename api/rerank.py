@@ -191,7 +191,7 @@ async def _call_llm_batch(
     headers = {"Authorization": f"Bearer {bai_key}", "Content-Type": "application/json"}
     url = f"{bai_url}/chat/completions"
     try:
-        resp = await post_json(url, payload, headers=headers, timeout=_LLM_TIMEOUT, retries=_LLM_RETRIES)
+        resp = await post_json(url, payload, headers=headers, timeout=_LLM_TIMEOUT, attempts=_LLM_RETRIES)
     except Exception as e:
         log.debug("reranker LLM batch failed: %s", e)
         return []

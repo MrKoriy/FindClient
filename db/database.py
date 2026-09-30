@@ -42,6 +42,15 @@ CREATE TABLE IF NOT EXISTS seen_orders (
 
 CREATE INDEX IF NOT EXISTS idx_seen_matched ON seen_orders(matched);
 
+CREATE TABLE IF NOT EXISTS order_deliveries (
+    uid         TEXT NOT NULL,
+    chat_id     INTEGER NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'pending',
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (uid, chat_id)
+);
+
 CREATE TABLE IF NOT EXISTS chat_settings (
     chat_id     INTEGER NOT NULL,
     key         TEXT NOT NULL,
@@ -55,6 +64,9 @@ CREATE TABLE IF NOT EXISTS tg_leads (
     name        TEXT NOT NULL DEFAULT '',
     niche       TEXT NOT NULL DEFAULT '',
     chats       TEXT NOT NULL DEFAULT '',
+    phone       TEXT NOT NULL DEFAULT '',
+    bio         TEXT NOT NULL DEFAULT '',
+    sample      TEXT NOT NULL DEFAULT '',
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 """
@@ -76,6 +88,11 @@ _MIGRATIONS = {
         ("score", "INTEGER NOT NULL DEFAULT 0"),
         ("director", "TEXT NOT NULL DEFAULT ''"),
         ("inn", "TEXT NOT NULL DEFAULT ''"),
+    ],
+    "tg_leads": [
+        ("phone", "TEXT NOT NULL DEFAULT ''"),
+        ("bio", "TEXT NOT NULL DEFAULT ''"),
+        ("sample", "TEXT NOT NULL DEFAULT ''"),
     ],
 }
 
@@ -182,26 +199,36 @@ class Database:
         filters: str = "",
     ) -> int:
         """Save a scrape session and its organizations. Returns session ID."""
-        cursor = await self._conn.execute(
-            "INSERT INTO scrape_sessions (niche, count, city, sources, filters) VALUES (?, ?, ?, ?, ?)",
-            (niche, len(organizations), city, sources, filters),
-        )
-        session_id = cursor.lastrowid
-        assert session_id is not None
+        # validate batch up-front so a bad record doesn't leak a half-committed session
+        for org in organizations:
+            if "id" not in org:
+                raise KeyError(f"organization missing 'id': {org!r}")
+        try:
+            cursor = await self._conn.execute(
+                "INSERT INTO scrape_sessions (niche, count, city, sources, filters) VALUES (?, ?, ?, ?, ?)",
+                (niche, len(organizations), city, sources, filters),
+            )
+            session_id = cursor.lastrowid
+            assert session_id is not None
 
-        cols = ", ".join(_ORG_FIELDS)
-        marks = ", ".join("?" for _ in _ORG_FIELDS)
-        await self._conn.executemany(
-            f"INSERT OR IGNORE INTO organizations (org_id, session_id, {cols}) "
-            f"VALUES (?, ?, {marks})",
-            [
-                (org["id"], session_id, *[org.get(f, _ORG_DEFAULTS.get(f, "")) for f in _ORG_FIELDS])
-                for org in organizations
-            ],
-        )
-
-        await self._conn.commit()
-        return session_id
+            cols = ", ".join(_ORG_FIELDS)
+            marks = ", ".join("?" for _ in _ORG_FIELDS)
+            await self._conn.executemany(
+                f"INSERT OR IGNORE INTO organizations (org_id, session_id, {cols}) "
+                f"VALUES (?, ?, {marks})",
+                [
+                    (org["id"], session_id, *[org.get(f, _ORG_DEFAULTS.get(f, "")) for f in _ORG_FIELDS])
+                    for org in organizations
+                ],
+            )
+            await self._conn.commit()
+            return session_id
+        except Exception:
+            try:
+                await self._conn.rollback()
+            except Exception:
+                pass
+            raise
 
     async def get_session_orgs(self, session_id: int) -> list[dict]:
         """Return organizations of a past session (for re-download)."""
@@ -294,6 +321,22 @@ class Database:
         )
         await self._conn.commit()
 
+    async def mark_delivered(self, uid: str, chat_id: int, ok: bool) -> None:
+        status = "sent" if ok else "failed"
+        await self._conn.execute(
+            "INSERT INTO order_deliveries (uid, chat_id, status, attempts) "
+            "VALUES (?, ?, ?, 1) ON CONFLICT(uid, chat_id) DO UPDATE SET "
+            "status=excluded.status, attempts=attempts+1, updated_at=datetime('now')",
+            (uid, chat_id, status),
+        )
+        await self._conn.commit()
+
+    async def pending_deliveries(self, uid: str) -> list[int]:
+        cur = await self._conn.execute(
+            "SELECT chat_id FROM order_deliveries WHERE uid=? AND status='failed'", (uid,)
+        )
+        return [r[0] for r in await cur.fetchall()]
+
     async def count_orders_by_source(self) -> dict[str, int]:
         cur = await self._conn.execute("SELECT source, COUNT(*) FROM seen_orders GROUP BY source")
         return {r[0]: r[1] for r in await cur.fetchall()}
@@ -360,12 +403,38 @@ class Database:
         return {r[0] for r in await cur.fetchall()}
 
     async def save_tg_leads(self, leads: list[dict], niche: str = "") -> None:
+        # upsert so updated bio/phone/username is not lost
         await self._conn.executemany(
-            "INSERT OR IGNORE INTO tg_leads (user_id, username, name, niche, chats) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO tg_leads (user_id, username, name, niche, chats, phone, bio, sample) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET "
+            "username=excluded.username, name=excluded.name, niche=excluded.niche, "
+            "chats=excluded.chats, phone=excluded.phone, bio=excluded.bio, sample=excluded.sample",
             [
-                (lead["user_id"], lead.get("username", ""), lead.get("name", ""), niche,
-                 ", ".join(sorted(lead.get("chats", []))))
+                (
+                    lead["user_id"], lead.get("username", ""), lead.get("name", ""), niche,
+                    ", ".join(sorted(lead.get("chats", []))),
+                    lead.get("phone", ""), lead.get("bio", "") or "", (lead.get("sample", "") or "")[:800],
+                )
                 for lead in leads
             ],
         )
         await self._conn.commit()
+
+    async def get_tg_leads(self, niche: str | None = None, limit: int = 1000) -> list[dict]:
+        if niche:
+            cur = await self._conn.execute(
+                "SELECT user_id, username, name, niche, chats, phone, bio, sample "
+                "FROM tg_leads WHERE niche = ? LIMIT ?",
+                (niche, limit),
+            )
+        else:
+            cur = await self._conn.execute(
+                "SELECT user_id, username, name, niche, chats, phone, bio, sample FROM tg_leads LIMIT ?", (limit,),
+            )
+        return [
+            {
+                "user_id": r[0], "username": r[1], "name": r[2], "niche": r[3],
+                "chats": r[4], "phone": r[5], "bio": r[6], "sample": r[7],
+            }
+            for r in await cur.fetchall()
+        ]

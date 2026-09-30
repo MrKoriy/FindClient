@@ -12,7 +12,9 @@ from aiogram.types import CallbackQuery, Message
 from data.niches import NICHES, get_niche
 from db.database import Database
 from handlers.common import BACK_TO_MENU, Progress, check, document, grid, kb, safe_edit
+from services.classifier import BUYER_Q, qualify_texts
 from services.export import TG_LEAD_COLUMNS, export_async
+from services.llm import LLM
 from services.telegram_service import TelegramUserService, harvest_channels
 
 log = logging.getLogger(__name__)
@@ -72,7 +74,10 @@ async def on_menu(callback: CallbackQuery, tg_service: TelegramUserService, db: 
     await safe_edit(callback, text, markup, parse_mode="HTML")
 
 
-async def _harvest(message: Message, chats: list[str], label: str, tg: TelegramUserService, db: Database) -> None:
+async def _harvest(
+    message: Message, chats: list[str], label: str, tg: TelegramUserService, db: Database,
+    llm: LLM | None = None,
+) -> None:
     status = await message.answer(f"👷 Собираю лидов «{label}» из {len(chats)} чатов…")
     progress = Progress(status, f"👷 «{label}»")
     try:
@@ -92,9 +97,21 @@ async def _harvest(message: Message, chats: list[str], label: str, tg: TelegramU
         )
         await status.edit_text(f"Новых контактов не найдено.{hint}")
         return
+    if llm and llm.jev_enabled:
+        await progress("Jev оценивает, кто из авторов — потенциальный заказчик…")
+        top = leads[:200]
+        probs = await qualify_texts(llm, [f"{l.name}\n{l.bio}\n{l.sample}" for l in top], BUYER_Q)
+        for lead, p in zip(top, probs):
+            if p is not None:
+                lead.score = int(lead.score * 0.4 + p * 60)
+        leads.sort(key=lambda l: l.score, reverse=True)
     if tg.enabled:
         await db.save_tg_leads([
-            {"user_id": lead.user_id, "username": lead.username, "name": lead.name, "chats": lead.chats}
+            {
+                "user_id": lead.user_id, "username": lead.username, "name": lead.name,
+                "chats": lead.chats, "phone": lead.phone or "", "bio": lead.bio or "",
+                "sample": lead.sample or "",
+            }
             for lead in leads if lead.user_id
         ], niche=label)
     with_contact = sum(1 for lead in leads if lead.username or lead.phone)
@@ -111,7 +128,9 @@ async def _harvest(message: Message, chats: list[str], label: str, tg: TelegramU
 
 
 @router.callback_query(F.data.startswith("tg:niche:"))
-async def on_niche(callback: CallbackQuery, tg_service: TelegramUserService, db: Database) -> None:
+async def on_niche(
+    callback: CallbackQuery, tg_service: TelegramUserService, db: Database, llm: LLM | None = None,
+) -> None:
     await callback.answer()
     n = get_niche(callback.data.split(":", 2)[2])
     if not n:
@@ -125,7 +144,7 @@ async def on_niche(callback: CallbackQuery, tg_service: TelegramUserService, db:
     if not chats:
         await callback.message.answer("Для этой ниши нет чатов. Используйте «Найти чаты по словам».")
         return
-    await _harvest(callback.message, chats, n.label, tg_service, db)
+    await _harvest(callback.message, chats, n.label, tg_service, db, llm)
 
 
 @router.callback_query(F.data == "tg:custom")
@@ -146,13 +165,16 @@ def _parse_chats(text: str) -> list[str]:
 
 
 @router.message(TgStates.custom_chats, F.text, ~F.text.startswith("/"))
-async def on_custom_chats(message: Message, state: FSMContext, tg_service: TelegramUserService, db: Database) -> None:
+async def on_custom_chats(
+    message: Message, state: FSMContext, tg_service: TelegramUserService, db: Database,
+    llm: LLM | None = None,
+) -> None:
     await state.clear()
     chats = _parse_chats(message.text)
     if not chats:
         await message.answer("Не нашёл ни одного чата в сообщении.")
         return
-    await _harvest(message, chats, "свои чаты", tg_service, db)
+    await _harvest(message, chats, "свои чаты", tg_service, db, llm)
 
 
 @router.callback_query(F.data == "tg:search")
@@ -192,14 +214,15 @@ async def on_search_keywords(message: Message, state: FSMContext, tg_service: Te
 
 @router.callback_query(F.data == "tg:harvest_found")
 async def on_harvest_found(
-    callback: CallbackQuery, state: FSMContext, tg_service: TelegramUserService, db: Database
+    callback: CallbackQuery, state: FSMContext, tg_service: TelegramUserService, db: Database,
+    llm: LLM | None = None,
 ) -> None:
     await callback.answer()
     chats = (await state.get_data()).get("found_chats") or []
     if not chats:
         await callback.message.answer("Сначала выполните поиск чатов.")
         return
-    await _harvest(callback.message, chats, "найденные чаты", tg_service, db)
+    await _harvest(callback.message, chats, "найденные чаты", tg_service, db, llm)
 
 
 @router.callback_query(F.data == "tg:watch")

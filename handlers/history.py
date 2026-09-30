@@ -43,12 +43,14 @@ async def on_menu_history(callback: CallbackQuery, db: Database) -> None:
 @router.callback_query(F.data.startswith("hi:get:"))
 async def on_download(callback: CallbackQuery, db: Database) -> None:
     await callback.answer()
-    rows = await db.get_session_orgs(int(callback.data.split(":")[2]))
+    sid = callback.data.split(":")[2]
+    rows = await db.get_session_orgs(int(sid))
     if not rows:
         await callback.message.answer("В этой сессии нет компаний.")
         return
     orgs = [Organization(**r) for r in rows]
     orgs.sort(key=lambda o: o.score, reverse=True)
     data, ext = await export_async(orgs, ORG_COLUMNS)
-    await callback.message.answer_document(document(data, f"сбор_{callback.data.split(':')[2]}.{ext}"),
-                                           caption=plural(len(orgs), "компания", "компании", "компаний"))
+    await callback.message.answer_document(document(data, f"сбор_{sid}.{ext}"),
+                                           caption=plural(len(orgs), "компания", "компании", "компаний"),
+                                           reply_markup=kb([[("📨 Добавить в рассылку", f"out:pick:{sid}")]]))

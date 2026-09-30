@@ -97,6 +97,8 @@ CREATE TABLE IF NOT EXISTS messages (
     tg_id       INTEGER,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
     sent_at     TEXT,
+    lease_owner TEXT    NOT NULL DEFAULT '',
+    lease_until TEXT    NOT NULL DEFAULT '',
     FOREIGN KEY (target_id) REFERENCES targets (id)
 );
 
@@ -210,6 +212,10 @@ async def init_db(path: str | None = None) -> None:
 _COLUMN_MIGRATIONS: dict[str, list[tuple[str, str]]] = {
     "targets": [
         ("director", "TEXT NOT NULL DEFAULT ''"),
+    ],
+    "messages": [
+        ("lease_owner", "TEXT NOT NULL DEFAULT ''"),
+        ("lease_until", "TEXT NOT NULL DEFAULT ''"),
     ],
 }
 
@@ -426,8 +432,17 @@ async def set_target_status(
                 " updated_at = datetime('now') WHERE id = ?",
                 (status, note, target_id),
             )
-    if status in ("replied", "refused", "blocked"):
-        await cancel_sequences(target_id, crm_db=crm_db)
+        if status in ("replied", "refused", "blocked", "skip"):
+            await conn.execute(
+                "UPDATE messages SET status = 'skipped', error = 'cancelled: target ' || ?"
+                " WHERE target_id = ? AND status IN ('queued','pending')",
+                (status, target_id),
+            )
+            await conn.execute(
+                "UPDATE sequences SET status = 'cancelled'"
+                " WHERE target_id = ? AND status IN ('pending','queued')",
+                (target_id,),
+            )
 
 
 async def save_target_username(target_id: int, username: str, crm_db: str | None = None) -> None:
@@ -499,6 +514,41 @@ async def queue_message(
         return int(cur.lastrowid)
 
 
+async def claim_next(
+    owner: str, lease_ms: int = 30_000, crm_db: str | None = None
+) -> dict | None:
+    """Atomically claim one queued message; returns claimed row or None."""
+    async with connect(crm_db) as conn:
+        await conn.execute(
+            "UPDATE messages SET status='sending', lease_owner=?,"
+            " lease_until=datetime('now', ?)"
+            " WHERE id=(SELECT id FROM messages WHERE status='queued'"
+            " ORDER BY id LIMIT 1) AND status='queued'",
+            (owner, f"+{lease_ms/1000:.3f} seconds"),
+        )
+        if conn.total_changes == 0:
+            return None
+        # reclaim expired leases (crash recovery)
+        # we just claimed the head; return it
+        cur = await conn.execute(
+            "SELECT * FROM messages WHERE lease_owner=? ORDER BY id DESC LIMIT 1", (owner,)
+        )
+        row = await cur.fetchone()
+        # verify it is the claimed one (status sending + our owner)
+        if row and row["status"] == "sending":
+            return dict(row)
+        return None
+
+
+async def release_expired_leases(crm_db: str | None = None) -> int:
+    async with connect(crm_db) as conn:
+        cur = await conn.execute(
+            "UPDATE messages SET status='queued', lease_owner='', lease_until=''"
+            " WHERE status='sending' AND lease_until != '' AND lease_until <= datetime('now')"
+        )
+        return cur.rowcount
+
+
 async def next_queued(crm_db: str | None = None) -> dict | None:
     async with connect(crm_db) as conn:
         cur = await conn.execute(
@@ -517,7 +567,7 @@ async def mark_message(
 ) -> None:
     async with connect(crm_db) as conn:
         await conn.execute(
-            "UPDATE messages SET status = ?, error = ?, tg_id = ?,"
+            "UPDATE messages SET status = ?, error = ?, tg_id = ?, lease_owner='', lease_until='',"
             " sent_at = CASE WHEN ? = 'sent' THEN datetime('now') ELSE sent_at END"
             " WHERE id = ?",
             (status, error[:500], tg_id, status, message_id),
@@ -530,9 +580,17 @@ async def mark_message(
             if row and row["target_id"]:
                 await conn.execute(
                     "UPDATE targets SET status = 'sent', updated_at = datetime('now')"
-                    " WHERE id = ?",
+                    " WHERE id = ? AND status NOT IN ('replied','refused','blocked','skip')",
                     (row["target_id"],),
                 )
+            # keep sequence in sync
+            await conn.execute(
+                "UPDATE sequences SET status='sent' WHERE message_id=? AND status='queued'", (message_id,)
+            )
+        elif status in ("failed", "skipped", "cancelled"):
+            await conn.execute(
+                "UPDATE sequences SET status=? WHERE message_id=? AND status='queued'", (status, message_id)
+            )
 
 
 async def sent_today(crm_db: str | None = None, tz_offset: int = 3) -> int:
@@ -664,6 +722,17 @@ async def list_due_sequences(limit: int = 10, crm_db: str | None = None) -> list
     return [dict(r) for r in rows]
 
 
+async def target_blocked_until(target_id: int, crm_db: str | None = None) -> str | None:
+    async with connect(crm_db) as conn:
+        cur = await conn.execute(
+            "SELECT status FROM targets WHERE id=?", (target_id,)
+        )
+        row = await cur.fetchone()
+    if row and row["status"] in ("blocked", "replied", "refused", "skip"):
+        return "blocked"
+    return None
+
+
 async def cancel_sequences(target_id: int, crm_db: str | None = None) -> int:
     """Помечает все pending шаги цели как cancelled."""
     async with connect(crm_db) as conn:
@@ -714,13 +783,30 @@ async def create_drip_sequence(
     crm_db: str | None = None,
 ) -> list[int]:
     """Удобный хелпер: первый шаг queued/срок now, остальные pending с задержкой."""
+    if not template_bodies or any(not (b or "").strip() for b in template_bodies):
+        raise ValueError("template_bodies must be non-empty strings")
+    if delays_hours is not None:
+        if not delays_hours or any(not isinstance(d, int) or d < 0 for d in delays_hours):
+            raise ValueError("delays_hours must be non-empty non-negative ints")
     if delays_hours is None:
         delays_hours = [0, 48, 96, 168, 240]
     ids: list[int] = []
     async with connect(crm_db) as conn:
+        cur = await conn.execute("SELECT username, phone, email FROM targets WHERE id=?", (target_id,))
+        row = await cur.fetchone()
+        has_contact = bool(
+            row
+            and (
+                (row["username"] or "").strip()
+                or (row["phone"] or "").strip()
+                or (row["email"] or "").strip()
+            )
+        )
         for idx, body in enumerate(template_bodies):
             delay = delays_hours[idx] if idx < len(delays_hours) else delays_hours[-1]
             status = "queued" if idx == 0 else "pending"
+            if idx == 0 and not has_contact:
+                status = "waiting_for_recipient"
             if delay == 0:
                 cur = await conn.execute(
                     "INSERT INTO sequences (target_id, step, body, due_at, status)"

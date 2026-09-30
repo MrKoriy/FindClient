@@ -273,6 +273,7 @@ async def run_search(message: Message, req: ScrapeRequest, fmt: str, scrape_serv
     await message.answer_document(
         document(data, name),
         caption=plural(len(result.organizations), "компания", "компании", "компаний"),
+        reply_markup=kb([[("📨 Добавить в рассылку", f"out:pick:{result.session_id}")]]) if result.session_id else None,
     )
 
 

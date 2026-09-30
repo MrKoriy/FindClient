@@ -25,7 +25,7 @@ SOCIAL_DOMAINS = (
 
 
 def is_social_url(url: str) -> bool:
-    """True for social networks, messengers and aggregators (not an own website)."""
+    """True for social networks, messengers and aggregators (not an own website). Audit §5.7: host-boundary only."""
     if not url:
         return False
     u = url.strip().lower()
@@ -33,8 +33,16 @@ def is_social_url(url: str) -> bool:
         u = "http://" + u
     parsed = urlparse(u)
     host = parsed.netloc.removeprefix("www.")
-    full = host + parsed.path
-    return any(host == d or host.endswith("." + d) or full.startswith(d) for d in SOCIAL_DOMAINS)
+    path = parsed.path.lower()
+    for d in SOCIAL_DOMAINS:
+        if "/" in d:
+            base, suffix = d.split("/", 1)
+            if (host == base or host.endswith("." + base)) and path.startswith("/" + suffix):
+                return True
+        else:
+            if host == d or host.endswith("." + d):
+                return True
+    return False
 
 
 _TRACKING = re.compile(r"^(utm_\w+|yclid|gclid|fbclid|_openstat|from|ref)$", re.I)
@@ -63,6 +71,15 @@ def phone_key(phone: str) -> str:
     first = phone.split(",")[0]
     digits = re.sub(r"\D", "", first)
     return digits[-10:] if len(digits) >= 10 else ""
+
+
+def phone_keys(phone: str) -> set[str]:
+    out: set[str] = set()
+    for part in (phone or "").split(","):
+        digits = re.sub(r"\D", "", part)
+        if len(digits) >= 10:
+            out.add(digits[-10:])
+    return out
 
 
 def _digits(part: str) -> str:

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import aiohttp
 
-from api.common import is_mobile_phone, messenger_link, mobile_numbers, name_key, phone_key
+from api.common import is_mobile_phone, messenger_link, mobile_numbers, name_key, phone_key, phone_keys
 from api.twogis_api import TwoGISApi
 from api.twogis_client import TwoGISClient
 from api.yandex_client import YandexMapsClient
@@ -68,6 +68,7 @@ class ScrapeResult:
     already_in_db: int = 0
     per_source: dict[str, int] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
+    session_id: int = 0
 
     @property
     def with_phone(self) -> int:
@@ -117,8 +118,11 @@ def merge_organizations(orgs: list[Organization]) -> tuple[list[Organization], i
     by_key: dict[str, Organization] = {}
     merged = 0
     for org in orgs:
-        pk = phone_key(org.phone)
-        nm_key = f"nm:{name_key(org.name, org.address.split(',')[0])}"
+        pks = phone_keys(org.phone)
+        pk = next(iter(pks), "")
+        # адрес: первые 2 части (улица, дом) — филиалы одного дома с разным этажом мержим, разные улицы нет
+        addr2 = ",".join((org.address or "").split(",")[:2])
+        nm_key = f"nm:{name_key(org.name, addr2)}"
         # ищем по id и phone — всегда надёжно
         existing = by_key.get(f"id:{org.id}")
         if not existing and pk:
@@ -205,6 +209,8 @@ class ScrapeService:
                     query, req.city, need, only_without_site=req.only_without_site,
                     skip_ids=skip, on_progress=on_page,
                 )
+            except (TimeoutError, aiohttp.ClientConnectionError):
+                raise  # 2gis.ru itself is unreachable — page scraping would only wait longer
             except Exception as exc:
                 log.warning("2GIS API failed, falling back to web pages: %s", exc)
 
@@ -281,7 +287,7 @@ class ScrapeService:
             combined = "; ".join(errs) if errs else None
             return got, combined
 
-        timeout = aiohttp.ClientTimeout(total=60)
+        timeout = aiohttp.ClientTimeout(total=60, sock_connect=10)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             results = await asyncio.gather(*(collect(s) for s in req.sources), return_exceptions=True)
         for source, result in zip(req.sources, results, strict=True):
@@ -321,7 +327,7 @@ class ScrapeService:
             return (o.source or "").split("+")[0] == "avito" or o.id.startswith("avito:")
 
         min_reviews = min_reviews_for(req.city)
-        fresh = [o for o in fresh if _is_avito(o) or o.reviews >= min_reviews]
+        fresh = [o for o in fresh if _is_avito(o) or o.reviews is None or o.reviews >= min_reviews]
         fresh = [  # noqa: E501
             o for o in fresh if _is_avito(o) or is_mobile_phone(o.phone) or messenger_link(o.socials)
         ]
@@ -354,8 +360,9 @@ class ScrapeService:
             except Exception as exc:
                 log.debug("site-check skipped: %s", exc)
 
+        session_id = 0
         if fresh:
-            await self.db.save_session(
+            session_id = await self.db.save_session(
                 req.niche, [asdict(o) for o in fresh], city=req.city,
                 sources=",".join(req.sources), filters=req.filters,
             )
@@ -367,6 +374,7 @@ class ScrapeService:
             already_in_db=len(known),
             per_source=per_source,
             errors=errors,
+            session_id=session_id,
         )
 
     async def _enrich_directors(self, session, orgs, progress) -> None:

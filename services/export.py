@@ -64,6 +64,9 @@ _HEADER_FONT = Font(bold=True, color="FFFFFF")
 _ZEBRA_FILL = PatternFill("solid", fgColor="F2F6FC")
 
 
+_FORMULA_PREFIX = ("=", "+", "-", "@")
+
+
 def _cell(item: Any, attr: str) -> Any:
     # Вычисляемые колонки: работают и для Organization, и для строк истории из БД.
     if attr == "messenger":
@@ -74,11 +77,16 @@ def _cell(item: Any, attr: str) -> Any:
             return ""
         city = str(_cell(item, "city") or "").strip()
         return "https://www.rusprofile.ru/search?query=" + quote_plus(f"{name} {city}".strip())
-    value = getattr(item, attr, "") if not isinstance(item, dict) else item.get(attr, "")
-    if value is None:
+    raw = getattr(item, attr, "") if not isinstance(item, dict) else item.get(attr, "")
+    if raw is None:
         return ""
-    if isinstance(value, (set, list, tuple)):
-        return ", ".join(sorted(str(v) for v in value))
+    if isinstance(raw, (set, list, tuple)):
+        value = ", ".join(sorted(str(v) for v in raw))
+    else:
+        value = raw
+    if isinstance(value, str) and value and value[0] in _FORMULA_PREFIX \
+            and attr not in ("url", "link", "website", "messenger", "revenue_check"):
+        return "'" + value
     return value
 
 

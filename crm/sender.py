@@ -96,20 +96,14 @@ def make_client():
 
 
 async def _adaptive_throttle(crm_path: str | None, wait: int = 0, peer_flood: bool = False) -> None:
-    """Снижает daily_cap и увеличивает cooldown при флуд-ошибках.
-
-    Логика:
-    - consecutive_floods ++; после 3 флудов cap падает сильнее (x0.5 вместо x0.6)
-    - новый cap = max(5, int(cap * factor))
-    - cooldown_seconds = min(3600, int(cooldown * 1.5))
-    - пишет событие flood в лог
-    """
+    """Снижает daily_cap и увеличивает cooldown при флуд-ошибках — никогда не повышает."""
     settings = await crm_db.get_settings(crm_path)
     cap = int(settings.get("daily_cap", "10"))
     cooldown = int(settings.get("cooldown_seconds", "1200"))
     consecutive = int(settings.get("consecutive_floods", "0")) + 1
     factor = 0.5 if consecutive >= 3 else 0.6
-    new_cap = max(5, int(cap * factor))
+    new_cap = min(cap, int(cap * factor))
+    new_cap = max(1, new_cap)
     new_cooldown = min(3600, int(cooldown * 1.5))
     await crm_db.set_settings(
         {"daily_cap": str(new_cap), "cooldown_seconds": str(new_cooldown),
@@ -211,35 +205,50 @@ async def run_once(client, crm_path: str | None = None) -> bool:
         log.info("дневной лимит выбран: %s/%s", today, cap)
         return False
 
-    # Drip: проверить созревшие шаги и поставить их в очередь
-    try:
-        due = await crm_db.list_due_sequences(limit=10, crm_db=crm_path)
-    except Exception:
-        due = []
-    for seq in due:
-        target = await crm_db.get_target(seq["target_id"], crm_db=crm_path)
-        chat = (target.get("username") if target else "") or ""
-        if not chat:
-            # некуда отправлять — пропускаем, оставляем pending
-            continue
-        mid = await crm_db.queue_message(seq["target_id"], chat, seq["body"], crm_db=crm_path)
-        await crm_db.mark_sequence_queued(seq["id"], mid, crm_db=crm_path)
-        log.info("drip step %s -> queued as message %s for @%s", seq["id"], mid, chat)
+    # Drip: только если включено; пропускаем blocked/replied цели
+    if settings.get("drip_enabled") == "1":
+        try:
+            due = await crm_db.list_due_sequences(limit=10, crm_db=crm_path)
+        except Exception:
+            due = []
+        for seq in due:
+            target = await crm_db.get_target(seq["target_id"], crm_db=crm_path)
+            if not target or target.get("status") in ("blocked", "replied", "refused", "skip"):
+                await crm_db.cancel_sequences(target["id"] if target else 0, crm_db=crm_path)
+                continue
+            chat = (target.get("username") or "").strip()
+            if not chat:
+                continue
+            mid = await crm_db.queue_message(seq["target_id"], chat, seq["body"], crm_db=crm_path)
+            await crm_db.mark_sequence_queued(seq["id"], mid, crm_db=crm_path)
+            log.info("drip step %s -> queued as message %s for @%s", seq["id"], mid, chat)
 
-    message = await crm_db.next_queued(crm_path)
+    await crm_db.release_expired_leases(crm_path)
+    message = await crm_db.claim_next(str(id(client)), crm_db=crm_path)
     if not message:
         return False
+
+    # re-check target status after claim (blocked between claim and send)
+    if message.get("target_id"):
+        tgt = await crm_db.get_target(int(message["target_id"]), crm_db=crm_path)
+        if tgt and tgt.get("status") in ("blocked", "replied", "refused", "skip"):
+            await crm_db.mark_message(message["id"], "skipped", "target blocked/replied", None, crm_db=crm_path)
+            return True
 
     log.info("отправляю @%s (%s/%s за сегодня)", message["chat"], today + 1, cap)
     status, error, tg_id = await send_one(client, message, settings, crm_path)
     if status == "queued":
-        # Долгий FloodWait: проваленным сообщение НЕ помечаем - оно остаётся
-        # в очереди и уйдёт после снятия лимита. Пауза здесь, чтобы main()
-        # не долбил по тому же лимиту раз в секунду.
-        log.warning("  -> %s %s (остаётся в очереди)", status, error)
+        # Долгий FloodWait: release lease so it retries after backoff
+        await crm_db.mark_message(message["id"], "queued", error, None, crm_db=crm_path)
+        await asyncio.sleep(min(FLOOD_RETRY_PAUSE, 300))
+        return True
+    if status == "failed" and "PEER_FLOOD" in error:
+        # persist block: treat as hard stop, long cooldown, no retry this tick
+        await crm_db.set_settings({"blocked_until": str(int(__import__("time").time()) + 24*3600)}, crm_path)
+        await crm_db.mark_message(message["id"], "failed", error, None, crm_db=crm_path)
         await asyncio.sleep(FLOOD_RETRY_PAUSE)
         return True
-    await crm_db.mark_message(message["id"], status, error, tg_id, crm_path)
+    await crm_db.mark_message(message["id"], status, error, tg_id, crm_db=crm_path)
     log.info("  -> %s %s", status, error)
 
     if status == "sent":
