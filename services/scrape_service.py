@@ -8,7 +8,7 @@ from pathlib import Path
 
 import aiohttp
 
-from api.common import is_mobile_phone, messenger_link, mobile_numbers, name_key, phone_key
+from api.common import is_mobile_phone, messenger_link, mobile_numbers, name_key, phone_key, phone_keys
 from api.twogis_api import TwoGISApi
 from api.twogis_client import TwoGISClient
 from api.yandex_client import YandexMapsClient
@@ -118,8 +118,11 @@ def merge_organizations(orgs: list[Organization]) -> tuple[list[Organization], i
     by_key: dict[str, Organization] = {}
     merged = 0
     for org in orgs:
-        pk = phone_key(org.phone)
-        nm_key = f"nm:{name_key(org.name, org.address.split(',')[0])}"
+        pks = phone_keys(org.phone)
+        pk = next(iter(pks), "")
+        # адрес: первые 2 части (улица, дом) — филиалы одного дома с разным этажом мержим, разные улицы нет
+        addr2 = ",".join((org.address or "").split(",")[:2])
+        nm_key = f"nm:{name_key(org.name, addr2)}"
         # ищем по id и phone — всегда надёжно
         existing = by_key.get(f"id:{org.id}")
         if not existing and pk:
@@ -324,7 +327,7 @@ class ScrapeService:
             return (o.source or "").split("+")[0] == "avito" or o.id.startswith("avito:")
 
         min_reviews = min_reviews_for(req.city)
-        fresh = [o for o in fresh if _is_avito(o) or o.reviews >= min_reviews]
+        fresh = [o for o in fresh if _is_avito(o) or o.reviews is None or o.reviews >= min_reviews]
         fresh = [  # noqa: E501
             o for o in fresh if _is_avito(o) or is_mobile_phone(o.phone) or messenger_link(o.socials)
         ]

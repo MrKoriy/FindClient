@@ -790,7 +790,7 @@ async def create_drip_sequence(
             raise ValueError("delays_hours must be non-empty non-negative ints")
     if delays_hours is None:
         delays_hours = [0, 48, 96, 168, 240]
-    # validate target has reachable contact for first step; else waiting_for_recipient
+    ids: list[int] = []
     async with connect(crm_db) as conn:
         cur = await conn.execute("SELECT username, phone, email FROM targets WHERE id=?", (target_id,))
         row = await cur.fetchone()
@@ -802,8 +802,6 @@ async def create_drip_sequence(
                 or (row["email"] or "").strip()
             )
         )
-    ids: list[int] = []
-    async with connect(crm_db) as conn:
         for idx, body in enumerate(template_bodies):
             delay = delays_hours[idx] if idx < len(delays_hours) else delays_hours[-1]
             status = "queued" if idx == 0 else "pending"

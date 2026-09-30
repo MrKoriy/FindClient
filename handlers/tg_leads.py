@@ -107,7 +107,11 @@ async def _harvest(
         leads.sort(key=lambda l: l.score, reverse=True)
     if tg.enabled:
         await db.save_tg_leads([
-            {"user_id": lead.user_id, "username": lead.username, "name": lead.name, "chats": lead.chats}
+            {
+                "user_id": lead.user_id, "username": lead.username, "name": lead.name,
+                "chats": lead.chats, "phone": lead.phone or "", "bio": lead.bio or "",
+                "sample": lead.sample or "",
+            }
             for lead in leads if lead.user_id
         ], niche=label)
     with_contact = sum(1 for lead in leads if lead.username or lead.phone)

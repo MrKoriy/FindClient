@@ -36,6 +36,7 @@ from crm import offer as crm_offer
 from crm import templates as tpl
 
 load_dotenv()
+load_dotenv("crm.env")
 
 TRUSTED_ORIGINS = {o.strip() for o in os.environ.get("CRM_TRUSTED_ORIGINS", "").split(",") if o.strip()}
 
@@ -53,7 +54,6 @@ def _origin_allowed(origin: str, request: web.Request) -> bool:
     except Exception:
         pass
     return False
-load_dotenv("crm.env")
 
 log = logging.getLogger("crm")
 
@@ -629,16 +629,16 @@ async def api_sequences_create(request: web.Request) -> web.Response:
     rendered_bodies = [tpl.render(b, target, link=LINK, with_link=with_link) for b in bodies]
 
     ids = await crm_db.create_drip_sequence(tid, rendered_bodies, delays_hours=delays)
-    # первый шаг сразу в очередь сообщений
-    first = (await crm_db.get_target_sequences(tid))[0] if ids else None
+    # первый шаг сразу в очередь сообщений — именно созданный ids[0]
+    first = None
+    if ids:
+        items_tmp = await crm_db.get_target_sequences(tid)
+        first = next((x for x in items_tmp if x["id"] == ids[0]), None)
     if first and first["status"] == "queued":
         chat = (target.get("username") or "").strip()
         if chat:
             mid = await crm_db.queue_message(tid, chat, first["body"])
             await crm_db.mark_sequence_queued(first["id"], mid)
-        else:
-            # некуда отправлять - оставляем как pending
-            pass
     items = await crm_db.get_target_sequences(tid)
     return web.json_response({"ok": True, "ids": ids, "items": items})
 

@@ -267,8 +267,9 @@ class TelegramUserService:
                     name = _channel_username(ref)
                     try:
                         last = self._last_ids.get(name, 0)
+                        max_seen = last
                         async for msg in self.client.iter_messages(name, limit=100, min_id=last):
-                            self._last_ids[name] = max(self._last_ids.get(name, 0), msg.id)
+                            max_seen = max(max_seen, msg.id)
                             text = msg.message or ""
                             if not SITE_REQUEST_RE.search(text):
                                 continue
@@ -278,6 +279,7 @@ class TelegramUserService:
                                 description=text[:1500],
                                 published=msg.date.strftime("%Y-%m-%d %H:%M") if isinstance(msg.date, datetime) else "",
                             ))
+                        self._last_ids[name] = max_seen
                     except Exception as exc:
                         log.warning("watch %s failed: %s", name, exc)
                     await asyncio.sleep(random.uniform(0.5, 1.5))

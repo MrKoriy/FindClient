@@ -130,33 +130,23 @@ class OrdersService:
         new_orders = [by_uid[u] for u in by_uid if u in new_uids]
         rejected = await self._jev_rejects(new_orders, configs)
 
-        # optional LLM rerank — fall back to CRM B.AI settings if bot env key empty
+        # unified LLM config: CRM settings always consulted regardless of env flag
         bai_key = self.bai_api_key
         bai_url = self.bai_base_url or "https://api.b.ai/v1"
         bai_model = self.bai_model or "qwen3.8-flash"
-        if self.llm_rerank and not bai_key:
-            try:
-                from crm.db import get_settings as _get_crm_settings  # type: ignore
+        crm_llm_enabled = False
+        try:
+            from crm.db import get_settings as _get_crm_settings  # type: ignore
 
-                crm_s = await _get_crm_settings()
-                if crm_s.get("orders_llm_rerank") == "1" or not self.llm_rerank:
-                    pass  # honour crm flag when env flag off but crm on — handled below
-                if not bai_key:
-                    bai_key = (crm_s.get("bai_api_key") or "").strip()
-                    bai_url = (crm_s.get("bai_base_url") or bai_url).strip()
-                    bai_model = (crm_s.get("bai_model") or bai_model).strip()
-            except Exception:
-                pass
-        use_llm = bool(rerank_orders is not None and bai_key)
-        # also honour per-process CRM flag if env flag was 0 but CRM turned it on
-        if not self.llm_rerank and use_llm:
-            try:
-                from crm.db import get_settings as _get_crm_settings2  # type: ignore
-
-                crm_s2 = await _get_crm_settings2()
-                use_llm = crm_s2.get("orders_llm_rerank") == "1"
-            except Exception:
-                use_llm = False
+            crm_s = await _get_crm_settings()
+            crm_llm_enabled = crm_s.get("orders_llm_rerank") == "1"
+            if not bai_key:
+                bai_key = (crm_s.get("bai_api_key") or "").strip()
+                bai_url = (crm_s.get("bai_base_url") or bai_url).strip()
+                bai_model = (crm_s.get("bai_model") or bai_model).strip()
+        except Exception:
+            pass
+        use_llm = bool(rerank_orders is not None and bai_key and (self.llm_rerank or crm_llm_enabled))
         llm_cache: dict[tuple[tuple[str, ...], tuple[str, ...]], dict[str, dict]] = {}
 
         async def _llm_meta_for(cfg: dict) -> dict[str, dict]:
@@ -218,19 +208,27 @@ class OrdersService:
                     try:
                         await self.sender(chat_id, format_order(o))
                         delivered_uids.add(o.uid)
+                        try:
+                            await self.db.mark_delivered(o.uid, chat_id, True)
+                        except Exception:
+                            pass
                     except Exception as exc:
                         log.warning("send to %s failed: %s", chat_id, exc)
+                        try:
+                            await self.db.mark_delivered(o.uid, chat_id, False)
+                        except Exception:
+                            pass
                     await asyncio.sleep(0.05)
 
-        # Провалившаяся доставка и обрезанные first_run хиты не «съедают» заказ:
-        # uid остаётся непросмотренным и уйдёт в следующем опросе.
-        # Помечаем только доставленное и всё, что никому не подошло.
+        # per-subscriber failed deliveries remain retryable; global seen only
+        # for fully delivered or unmatched (not when matched but not delivered)
         await self.db.mark_orders_seen([
             {"uid": o.uid, "source": o.source, "title": o.title, "url": o.url,
              "budget": o.budget, "matched": o.uid in matched_uids}
             for o in new_orders
             if (o.uid in delivered_uids or o.uid not in matched_uids)
             and o.uid not in truncated_uids
+            and not (o.uid in matched_uids and o.uid not in delivered_uids)
         ])
         return sent
 

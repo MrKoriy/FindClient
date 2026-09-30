@@ -73,6 +73,15 @@ def phone_key(phone: str) -> str:
     return digits[-10:] if len(digits) >= 10 else ""
 
 
+def phone_keys(phone: str) -> set[str]:
+    out: set[str] = set()
+    for part in (phone or "").split(","):
+        digits = re.sub(r"\D", "", part)
+        if len(digits) >= 10:
+            out.add(digits[-10:])
+    return out
+
+
 def _digits(part: str) -> str:
     return "".join(ch for ch in part if ch.isdigit())
 
