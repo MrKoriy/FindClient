@@ -250,9 +250,17 @@ class OutreachService:
         if not campaign:
             return False
         stopped = await self.crm.stopped_keys()
-        if any(k in stopped for k in stop_keys(lead["tg_username"], lead["tg_user_id"], lead["phone"])):
+        keys = stop_keys(lead["tg_username"], lead["tg_user_id"], lead["phone"])
+        if any(k in stopped for k in keys):
             await self.crm.update_lead(lead["id"], status="stopped")
             return False
+        # global dedup across campaigns: don't send twice to same recipient
+        try:
+            if lead["step"] == 0 and keys and await self.crm.is_recipient_contacted(keys):
+                await self.crm.update_lead(lead["id"], status="failed", note="duplicate recipient across campaigns")
+                return False
+        except Exception:
+            pass
         try:
             if lead["step"] == 0 and campaign["use_demo"] and self.demo_builder and lead["source"] == "maps" \
                     and not lead["demo_url"] and "{demo_url}" in self.template_for(lead, campaign):
@@ -265,11 +273,20 @@ class OutreachService:
             await self.accounts[acc].client.send_message(entity, text, link_preview=bool(lead["demo_url"]))
         except errors.PeerFloodError:
             self.paused_until[acc] = now + timedelta(hours=24)
+            # pin lead to this account so tick doesn't retry via another account
+            try:
+                await self.crm.update_lead(lead["id"], account=acc, next_at=(now + timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S"))
+            except Exception:
+                pass
             await self._notify(f"⛔ Аккаунт #{acc + 1}: Telegram ограничил первые сообщения (PeerFlood). "
                                "Пауза 24 ч. Снизьте дневной лимит и проверьте @SpamBot.")
             return False
         except errors.FloodWaitError as exc:
             self.paused_until[acc] = now + timedelta(seconds=exc.seconds + 60)
+            try:
+                await self.crm.update_lead(lead["id"], account=acc, next_at=(now + timedelta(seconds=exc.seconds + 60)).strftime("%Y-%m-%d %H:%M:%S"))
+            except Exception:
+                pass
             await self._notify(f"⏸ Аккаунт #{acc + 1}: FloodWait {exc.seconds} с — пауза.")
             return False
         except (errors.UserPrivacyRestrictedError, errors.UserIsBlockedError, errors.InputUserDeactivatedError,
@@ -338,10 +355,30 @@ class OutreachService:
         lead = await self.crm.find_lead_by_tg(sender_id, account=acc) or await self.crm.find_lead_by_tg(sender_id)
         if not lead or not text:
             return None
+        # stop chain immediately so tick cannot send follow-up while AI classifies
+        await self.crm.log_message(lead["id"], "in", text, label="pending")
+        # deterministic stop without waiting for AI
+        low = (text or "").strip().lower()
+        if any(k in low for k in ("не пишите", "отписк", "stop", "unsubscribe", "не интересно", "не надо")):
+            await self.crm.update_lead(lead["id"], status="stopped", last_label="stop", next_at="")
+            await self.crm.add_stop(stop_keys(lead["tg_username"], sender_id, lead["phone"]), reason="просил не писать")
+            cls = ReplyClass(label="stop", hot=0.0, confidence=1.0, backend="rules")
+            lead = await self.crm.get_lead(lead["id"])
+            if self.on_reply:
+                try:
+                    await self.on_reply(lead, text, cls)
+                except Exception:
+                    log.exception("on_reply callback failed")
+            return lead, cls
+        await self.crm.update_lead(lead["id"], status="replied", next_at="")
         msgs = await self.crm.messages(lead["id"])
         last_out = next((m["text"] for m in reversed(msgs) if m["direction"] == "out"), "")
         cls = await classify_reply(self.llm, text, last_out)
-        await self.crm.log_message(lead["id"], "in", text, label=cls.label)
+        # patch label on last inbound
+        try:
+            await self.crm.update_last_in_label(lead["id"], cls.label)
+        except Exception:
+            pass
         status = {
             "stop": "stopped", "not_interested": "lost", "has_site": "lost", "wrong_person": "lost",
             "interested": "interested", "price": "interested", "question": "interested",

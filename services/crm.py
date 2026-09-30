@@ -216,19 +216,23 @@ class CRM:
         return added, skipped
 
     async def _contacted_elsewhere(self, keys: list[str]) -> bool:
-        """Never message the same person from two campaigns."""
+        """Never message the same person from two campaigns (any non-new contact)."""
         for k in keys:
             kind, val = k.split(":", 1)
             if kind == "u":
-                sql, arg = "SELECT 1 FROM crm_leads WHERE lower(tg_username) = ? AND status != 'new' LIMIT 1", val
+                sql, arg = "SELECT 1 FROM crm_leads WHERE lower(tg_username) = ? AND status != 'new' AND status != 'failed' LIMIT 1", val
             elif kind == "id":
-                sql, arg = "SELECT 1 FROM crm_leads WHERE tg_user_id = ? AND status != 'new' LIMIT 1", int(val)
+                sql, arg = "SELECT 1 FROM crm_leads WHERE tg_user_id = ? AND status != 'new' AND status != 'failed' LIMIT 1", int(val)
             else:
-                sql, arg = "SELECT 1 FROM crm_leads WHERE substr(replace(replace(replace(replace(phone,'+',''),' ',''),'-',''),'(',''), -10) = ? AND status != 'new' LIMIT 1", val
+                sql, arg = "SELECT 1 FROM crm_leads WHERE substr(replace(replace(replace(replace(phone,'+',''),' ',''),'-',''),'(',''), -10) = ? AND status != 'new' AND status != 'failed' LIMIT 1", val
             cur = await self._c.execute(sql, (arg,))
             if await cur.fetchone():
                 return True
         return False
+
+    async def is_recipient_contacted(self, keys: list[str]) -> bool:
+        """Global check before sending: any prior non-failed contact with this recipient."""
+        return await self._contacted_elsewhere(keys)
 
     def _row(self, r) -> dict:
         d = dict(zip(LEAD_FIELDS, r))
@@ -306,6 +310,12 @@ class CRM:
         cur = await self._c.execute(
             "SELECT direction, text, label, created_at FROM crm_messages WHERE lead_id = ? ORDER BY id", (lead_id,))
         return [{"direction": r[0], "text": r[1], "label": r[2], "date": r[3]} for r in await cur.fetchall()]
+
+    async def update_last_in_label(self, lead_id: int, label: str) -> None:
+        await self._c.execute(
+            "UPDATE crm_messages SET label=? WHERE id=(SELECT id FROM crm_messages WHERE lead_id=? AND direction='in' ORDER BY id DESC LIMIT 1)",
+            (label, lead_id))
+        await self._c.commit()
 
     # ------------------------------------------------------------------
     # Stop-list

@@ -36,6 +36,23 @@ from crm import offer as crm_offer
 from crm import templates as tpl
 
 load_dotenv()
+
+TRUSTED_ORIGINS = {o.strip() for o in os.environ.get("CRM_TRUSTED_ORIGINS", "").split(",") if o.strip()}
+
+def _origin_allowed(origin: str, request: web.Request) -> bool:
+    if not origin:
+        return True
+    # allow same-origin (host matches)
+    try:
+        from urllib.parse import urlparse as _up
+        o = _up(origin)
+        if o.netloc == request.headers.get("Host", ""):
+            return True
+        if o.netloc in TRUSTED_ORIGINS:
+            return True
+    except Exception:
+        pass
+    return False
 load_dotenv("crm.env")
 
 log = logging.getLogger("crm")
@@ -79,9 +96,18 @@ def _check_basic(header: str | None) -> bool:
 
 @web.middleware
 async def auth_middleware(request: web.Request, handler):
-    if not USER or not PASSWORD:
+    # CSRF: mutating methods require JSON content-type and (SameSite handles cross-site; check Origin for POST)
+    if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+        ctype = request.content_type or ""
+        # allow form posts only to /auth; API must be json
+        if not request.path.startswith("/auth") and "application/json" not in ctype:
+            return web.json_response({"error": "Content-Type must be application/json"}, status=400)
+        origin = request.headers.get("Origin", "")
+        if origin and not _origin_allowed(origin, request):
+            return web.json_response({"error": "Origin not allowed"}, status=403)
+    if not USER or not PASSWORD or USER == "admin" and PASSWORD == "admin":
         return web.json_response(
-            {"error": "CRM_USER/CRM_PASS не заданы - панель не поднимется"},
+            {"error": "CRM_USER/CRM_PASS не заданы или дефолтные - панель не поднимется"},
             status=500,
         )
 
@@ -143,11 +169,13 @@ async def handle_auth(request: web.Request) -> web.Response:
         target = "/"
 
     resp = web.HTTPFound(target)
+    is_https = request.url.scheme == "https"
     resp.set_cookie(
         "crm_session",
         auth.create_session_cookie(uid),
         max_age=auth.SESSION_TTL,
         httponly=True,
+        secure=is_https,
         samesite="Lax",
         path="/",
     )
@@ -353,9 +381,29 @@ async def api_group_posted(request: web.Request) -> web.Response:
 async def api_settings(request: web.Request) -> web.Response:
     if request.method == "GET":
         return web.json_response(await crm_db.get_settings())
-    data = await request.json()
+    if request.content_type and "application/json" not in request.content_type:
+        return web.json_response({"error": "Content-Type must be application/json"}, status=400)
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "invalid JSON"}, status=400)
+    if not isinstance(data, dict):
+        return web.json_response({"error": "body must be object"}, status=400)
     allowed = set(crm_db.DEFAULT_SETTINGS)
-    values = {k: v for k, v in data.items() if k in allowed}
+    # validate numeric fields
+    num_int = {"daily_cap": (1, 1000), "min_delay": (5, 3600), "max_delay": (5, 3600),
+               "cooldown_every": (0, 100), "cooldown_seconds": (60, 3600),
+               "work_from": (0, 23), "work_to": (0, 24), "timezone_offset": (-12, 14)}
+    for k, rng in num_int.items():
+        if k in data:
+            try:
+                v = int(str(data[k]).strip())
+            except Exception:
+                return web.json_response({"error": f"{k} must be integer"}, status=400)
+            if not (rng[0] <= v <= rng[1]):
+                return web.json_response({"error": f"{k} out of range {rng}"}, status=400)
+            data[k] = str(v)
+    values = {k: str(v) for k, v in data.items() if k in allowed}
     if not values:
         return web.json_response({"error": "нечего сохранять"}, status=400)
     await crm_db.set_settings(values)
