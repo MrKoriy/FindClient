@@ -100,8 +100,11 @@ class Settings:
             CRM_URL=env("CRM_URL", "").strip() or "https://94-103-1-126.sslip.io:9444",
             ORDERS_LLM_RERANK=env("ORDERS_LLM_RERANK", "").strip() in ("1", "true", "True"),
             TG_EXTRA_SESSIONS=tuple(
-                v.strip() for k, v in sorted(os.environ.items())
-                if re.fullmatch(r"TG_SESSION_\d+", k) and v.strip()
+                v.strip()
+                for k, v in sorted(
+                    [kv for kv in os.environ.items() if re.fullmatch(r"TG_SESSION_\d+", kv[0]) and kv[1].strip()],
+                    key=lambda kv: int(re.search(r"(\d+)", kv[0]).group(1)),  # numeric: TG_SESSION_10 > TG_SESSION_2
+                )
             ),
             BAI_API_KEY=env("BAI_API_KEY", "").strip(),
             BAI_BASE_URL=env("BAI_BASE_URL", "https://api.b.ai/v1").strip() or "https://api.b.ai/v1",
