@@ -64,6 +64,18 @@ CREATE TABLE IF NOT EXISTS stoplist (
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Stable account identity: `slot` is what crm_leads.account / account_stats use;
+-- it is bound to the Telegram user id, so reordering TG_SESSION_N never moves
+-- follow-ups to a different account. Pauses survive restarts.
+CREATE TABLE IF NOT EXISTS outreach_accounts (
+    slot          INTEGER PRIMARY KEY,
+    tg_id         INTEGER NOT NULL UNIQUE,
+    paused_until  TEXT NOT NULL DEFAULT '',
+    pause_reason  TEXT NOT NULL DEFAULT '',
+    next_send     TEXT NOT NULL DEFAULT '',
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS account_stats (
     account     INTEGER NOT NULL,
     day         TEXT NOT NULL,
@@ -215,24 +227,24 @@ class CRM:
         await self._c.commit()
         return added, skipped
 
-    async def _contacted_elsewhere(self, keys: list[str]) -> bool:
+    async def _contacted_elsewhere(self, keys: list[str], exclude_lead: int = 0) -> bool:
         """Never message the same person from two campaigns (any non-new contact)."""
         for k in keys:
             kind, val = k.split(":", 1)
             if kind == "u":
-                sql, arg = "SELECT 1 FROM crm_leads WHERE lower(tg_username) = ? AND status != 'new' AND status != 'failed' LIMIT 1", val
+                sql, arg = "SELECT 1 FROM crm_leads WHERE lower(tg_username) = ? AND status != 'new' AND status != 'failed' AND id != ? LIMIT 1", val
             elif kind == "id":
-                sql, arg = "SELECT 1 FROM crm_leads WHERE tg_user_id = ? AND status != 'new' AND status != 'failed' LIMIT 1", int(val)
+                sql, arg = "SELECT 1 FROM crm_leads WHERE tg_user_id = ? AND status != 'new' AND status != 'failed' AND id != ? LIMIT 1", int(val)
             else:
-                sql, arg = "SELECT 1 FROM crm_leads WHERE substr(replace(replace(replace(replace(phone,'+',''),' ',''),'-',''),'(',''), -10) = ? AND status != 'new' AND status != 'failed' LIMIT 1", val
-            cur = await self._c.execute(sql, (arg,))
+                sql, arg = "SELECT 1 FROM crm_leads WHERE substr(replace(replace(replace(replace(replace(phone,'+',''),' ',''),'-',''),'(',''),')',''), -10) = ? AND status != 'new' AND status != 'failed' AND id != ? LIMIT 1", val
+            cur = await self._c.execute(sql, (arg, exclude_lead))
             if await cur.fetchone():
                 return True
         return False
 
-    async def is_recipient_contacted(self, keys: list[str]) -> bool:
+    async def is_recipient_contacted(self, keys: list[str], exclude_lead: int = 0) -> bool:
         """Global check before sending: any prior non-failed contact with this recipient."""
-        return await self._contacted_elsewhere(keys)
+        return await self._contacted_elsewhere(keys, exclude_lead)
 
     def _row(self, r) -> dict:
         d = dict(zip(LEAD_FIELDS, r))
@@ -347,6 +359,38 @@ class CRM:
         await self._c.execute(
             f"INSERT INTO account_stats (account, day, {field}) VALUES (?, ?, 1) "
             f"ON CONFLICT(account, day) DO UPDATE SET {field} = {field} + 1", (account, day))
+        await self._c.commit()
+
+    async def bind_account(self, tg_id: int, preferred: int) -> int:
+        """Slot for a Telegram account. First bind keeps the legacy index, so existing data stays put."""
+        cur = await self._c.execute("SELECT slot FROM outreach_accounts WHERE tg_id = ?", (tg_id,))
+        r = await cur.fetchone()
+        if r:
+            return int(r[0])
+        cur = await self._c.execute("SELECT 1 FROM outreach_accounts WHERE slot = ?", (preferred,))
+        if await cur.fetchone():
+            cur = await self._c.execute("SELECT COALESCE(MAX(slot), -1) + 1 FROM outreach_accounts")
+            preferred = int((await cur.fetchone())[0])
+        await self._c.execute("INSERT INTO outreach_accounts (slot, tg_id) VALUES (?, ?)", (preferred, tg_id))
+        await self._c.commit()
+        return preferred
+
+    async def account_state(self, slot: int) -> dict:
+        cur = await self._c.execute(
+            "SELECT paused_until, pause_reason, next_send FROM outreach_accounts WHERE slot = ?", (slot,))
+        r = await cur.fetchone()
+        return {"paused_until": r[0], "pause_reason": r[1], "next_send": r[2]} if r else \
+            {"paused_until": "", "pause_reason": "", "next_send": ""}
+
+    async def save_account_state(self, slot: int, **fields: str) -> None:
+        allowed = {"paused_until", "pause_reason", "next_send"}
+        sets = [f"{k} = ?" for k in fields if k in allowed]
+        if not sets:
+            return
+        vals = [fields[k] for k in fields if k in allowed]
+        await self._c.execute(
+            f"UPDATE outreach_accounts SET {', '.join(sets)}, updated_at = datetime('now') WHERE slot = ?",
+            (*vals, slot))
         await self._c.commit()
 
     async def account_active_days(self, account: int, before: str) -> int:

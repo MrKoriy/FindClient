@@ -28,17 +28,17 @@ if command -v apt-get >/dev/null 2>&1; then
 elif command -v dnf >/dev/null 2>&1; then
   dnf install -y -q python3 python3-pip git curl ca-certificates
 else
-  die "no apt-get/dnf — install python3 (>=3.10), venv, pip, git manually"
+  die "no apt-get/dnf — install python3 (>=3.12), venv, pip, git manually"
 fi
 
 PY=python3
-"$PY" - <<'PY' || die "python3 is older than 3.10 (the code uses X | None / match-style typing)"
-import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
+"$PY" - <<'PY' || die "python3 is older than 3.12 (datetime.UTC, PEP 604/695 typing)"
+import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)
 PY
 echo "python: $($PY -V)"
 
 log "Code"
-# Сервис работает от root (как и CRM-юниты), выделенный пользователь не нужен.
+# Сервисы работают от выделенного пользователя findclient (deploy/ensure_user.sh).
 mkdir -p "$APP_DIR"
 if [ -d "$APP_DIR/.git" ]; then
   git -C "$APP_DIR" remote set-url origin "$REPO"
@@ -54,10 +54,15 @@ else
 fi
 
 log "Python environment"
-[ -x "$APP_DIR/.venv/bin/python" ] || "$PY" -m venv "$APP_DIR/.venv"
-"$APP_DIR/.venv/bin/pip" install --upgrade -q pip wheel
-"$APP_DIR/.venv/bin/pip" install -q -r "$APP_DIR/requirements.txt"
-echo "installed: $("$APP_DIR/.venv/bin/pip" list --format=freeze | wc -l) packages"
+# Путь venv совпадает с ExecStart в юнитах systemd (/opt/2gi_scraper/venv).
+VENV="$APP_DIR/venv"
+[ -x "$VENV/bin/python" ] || "$PY" -m venv "$VENV"
+"$VENV/bin/pip" install --upgrade -q pip wheel
+"$VENV/bin/pip" install -q -r "$APP_DIR/requirements.txt" -c "$APP_DIR/requirements.lock"
+echo "installed: $("$VENV/bin/pip" list --format=freeze | wc -l) packages"
+
+log "Service user"
+APP_DIR="$APP_DIR" bash "$APP_DIR/deploy/ensure_user.sh"
 
 log "systemd unit"
 install -m 0644 "$APP_DIR/deploy/2gi-scraper.service" /etc/systemd/system/2gi-scraper.service
@@ -71,7 +76,7 @@ if [ ! -f "$APP_DIR/.env" ]; then
   cat <<EOF
 Created $APP_DIR/.env from .env.example. Edit it:
 
-    nano $APP_DIR/.env      # BOT_TOKEN is required, OWNER_IDS strongly recommended
+    nano $APP_DIR/.env      # BOT_TOKEN and OWNER_IDS are required
 
 Then:
 
@@ -86,6 +91,10 @@ chmod 600 "$APP_DIR/.env"
 if grep -q 'your_telegram_bot_token_here' "$APP_DIR/.env"; then
   die "$APP_DIR/.env still holds the placeholder BOT_TOKEN — put the real token in and re-run"
 fi
+if ! grep -qE '^OWNER_IDS=[0-9]' "$APP_DIR/.env"; then
+  die "$APP_DIR/.env: OWNER_IDS is empty — the bot refuses everyone without it. Add your Telegram ID and re-run"
+fi
+chown findclient:findclient "$APP_DIR/.env"
 
 if [ "$START" -eq 1 ]; then
   log "Restart"

@@ -24,6 +24,7 @@ from services.llm import LLM
 from services.offers import OfferLibrary
 from services.orders_service import OrdersService
 from services.outreach import OutreachLimits, OutreachService
+from services.recipient_guard import contacted_by_panel
 from services.scrape_service import ScrapeService
 from services.telegram_service import TelegramUserService
 from web.server import start_web
@@ -50,7 +51,8 @@ COMMANDS = [
 async def main() -> None:
     settings = Settings.from_env()
     if not settings.OWNER_IDS:
-        log.warning("OWNER_IDS is empty - anyone who finds the bot can use it")
+        log.error("OWNER_IDS is empty - the bot will refuse everyone and only show their Telegram ID. "
+                  "Put your ID into OWNER_IDS in .env and restart.")
 
     bot = Bot(token=settings.BOT_TOKEN)
     dp = Dispatcher()
@@ -133,17 +135,23 @@ async def main() -> None:
         for chat_id in targets:
             await bot.send_message(chat_id, text)
 
+    # CRM-панель живёт в отдельной базе рядом с scraper.db: общий дедуп первого контакта
+    crm_panel_db = os.environ.get("CRM_DB") or os.path.join(
+        os.path.dirname(os.path.abspath(settings.DB_PATH)), "crm.db")
+
     start_h, _, end_h = settings.OUTREACH_WORK_HOURS.partition("-")
     outreach = OutreachService(
         crm, accounts, llm=llm,
         limits=OutreachLimits(daily_new_max=settings.OUTREACH_DAILY_MAX,
                               work_start=int(start_h or 10), work_end=int(end_h or 19)),
         demo_builder=demo_builder, on_reply=on_reply, notify=notify_owners,
+        external_guard=lambda username: contacted_by_panel(username, crm_panel_db),
     )
 
     await bot.set_my_commands(COMMANDS)
     orders_service.start()
     if outreach.active_accounts():
+        await outreach.restore_state()  # stable account slots + pauses from before the restart
         outreach.start()
     try:
         await dp.start_polling(

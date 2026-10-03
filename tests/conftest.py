@@ -19,6 +19,18 @@ async def db(tmp_path):
     await d.close()
 
 
+TEST_OWNER = 1432816193
+TEST_SECRET = "test-secret-key-for-pytest-only-0123456789abcdef"
+TEST_PASS = "correct-horse-battery"
+
+
+@pytest.fixture(autouse=True)
+def _crm_auth_env(monkeypatch):
+    """Валидная конфигурация входа: секрет >= 32 символов и владелец."""
+    monkeypatch.setenv("CRM_SECRET_KEY", TEST_SECRET)
+    monkeypatch.setenv("OWNER_IDS", str(TEST_OWNER))
+
+
 @pytest.fixture(autouse=True)
 def _mock_crm_network(monkeypatch):
     """Тесты CRM не ходят в TypeSafe/B.AI: остаётся детерминированный rules-движок."""

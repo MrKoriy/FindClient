@@ -25,6 +25,26 @@ TG_USER_RE = re.compile(r"(?:https?://)?(?:t\.me|telegram\.me)/([A-Za-z][A-Za-z0
 TG_PHONE_RE = re.compile(r"(?:https?://)?t\.me/\+?(\d{10,15})")
 PLACEHOLDER_RE = re.compile(r"\{([a-z_]{2,20})\}")  # unknown names render as empty
 
+# Explicit "stop messaging me" requests. Handled deterministically before any AI call and
+# put on the permanent stop list, so the patterns are narrow on purpose: an ordinary
+# refusal ("не интересно") just stops the chain via the normal reply path, and
+# "отпишитесь" (= "reply to me") must not count as "unsubscribe".
+_STOP_PATTERNS = [re.compile(p, re.I) for p in (
+    r"\bне\s+(?:пиши|пишите|писать|присылайте|беспокойте|беспокоить|надоедайте|звоните)\b",
+    r"\bотпис(?:ать|аться|ка|ке|ку)\b",
+    r"\bunsubscribe\b",
+    r"^\W*(?:стоп|stop)\W*$",
+    r"\b(?:удалите|уберите|исключите)\s+(?:меня|мой\s+(?:номер|контакт)|из\s+(?:рассылки|базы|списка))",
+    r"\bэто\s+спам\b",
+    r"\bпожалуюсь\b",
+)]
+
+
+def is_explicit_stop(text: str) -> bool:
+    low = (text or "").strip().lower().replace("ё", "е")
+    return bool(low) and any(p.search(low) for p in _STOP_PATTERNS)
+
+
 ReplyCallback = Callable[[dict, str, ReplyClass], Awaitable[None]]
 Notify = Callable[[str], Awaitable[None]]
 
@@ -99,6 +119,7 @@ class OutreachService:
         demo_builder: Callable[[dict, dict], Awaitable[str]] | None = None,
         on_reply: ReplyCallback | None = None,
         notify: Notify | None = None,
+        external_guard: Callable[[str], Awaitable[bool]] | None = None,
     ) -> None:
         self.crm = crm
         self.accounts = accounts
@@ -107,8 +128,12 @@ class OutreachService:
         self.demo_builder = demo_builder
         self.on_reply = on_reply
         self.notify = notify
+        # "was this @username already contacted by the other outreach system (CRM panel)?"
+        self.external_guard = external_guard
         self.paused_until: dict[int, datetime] = {}
         self.next_send: dict[int, datetime] = {}
+        # list index -> stable CRM slot (bound to the Telegram user id by restore_state)
+        self.slots: dict[int, int] = {}
         self._task: asyncio.Task | None = None
         self._handlers_installed: set[int] = set()
 
@@ -119,8 +144,58 @@ class OutreachService:
     def active_accounts(self) -> list[int]:
         return [i for i, a in enumerate(self.accounts) if getattr(a, "enabled", False)]
 
+    def _slot(self, acc: int) -> int:
+        """CRM key of an account (stable across reordering of TG_SESSION_N)."""
+        return self.slots.get(acc, acc)
+
+    def _index(self, slot: int) -> int | None:
+        """List index of the account that owns a CRM slot (None if it is not connected now)."""
+        for i, s in self.slots.items():
+            if s == slot:
+                return i
+        if slot not in self.slots and 0 <= slot < len(self.accounts):
+            return slot  # unbound account: slot == index
+        return None
+
+    async def restore_state(self) -> None:
+        """Bind accounts to stable slots by Telegram id and reload pauses saved before a restart."""
+        for i in self.active_accounts():
+            try:
+                me = await self.accounts[i].client.get_me()
+                tg_id = int(getattr(me, "id", 0) or 0)
+            except Exception as exc:
+                log.warning("account #%d: get_me failed, keeping index as slot: %s", i + 1, exc)
+                continue
+            if tg_id:
+                self.slots[i] = await self.crm.bind_account(tg_id, preferred=i)
+        for i in self.active_accounts():
+            if i not in self.slots:
+                continue
+            state = await self.crm.account_state(self._slot(i))
+            for attr, key in ((self.paused_until, "paused_until"), (self.next_send, "next_send")):
+                raw = state.get(key) or ""
+                if raw:
+                    try:
+                        attr[i] = datetime.fromisoformat(raw)
+                    except ValueError:
+                        pass
+
+    async def _save_state(self, acc: int, reason: str | None = None) -> None:
+        if acc not in self.slots:
+            return
+        fields = {
+            "paused_until": self.paused_until[acc].isoformat() if acc in self.paused_until else "",
+            "next_send": self.next_send[acc].isoformat() if acc in self.next_send else "",
+        }
+        if reason is not None:
+            fields["pause_reason"] = reason
+        try:
+            await self.crm.save_account_state(self._slot(acc), **fields)
+        except Exception:
+            log.exception("could not persist state of account #%d", acc + 1)
+
     async def daily_limit(self, account: int, now: datetime | None = None) -> int:
-        days = await self.crm.account_active_days(account, before=self._today(now or utcnow()))
+        days = await self.crm.account_active_days(self._slot(account), before=self._today(now or utcnow()))
         lim = self.limits
         return min(lim.daily_new_max, lim.warmup_start + lim.warmup_step * days)
 
@@ -137,7 +212,7 @@ class OutreachService:
         now = utcnow()
         out = []
         for i, acc in enumerate(self.accounts):
-            day = await self.crm.account_day(i, self._today(now))
+            day = await self.crm.account_day(self._slot(i), self._today(now))
             paused = self.paused_until.get(i)
             out.append({
                 "account": i, "enabled": getattr(acc, "enabled", False), "error": getattr(acc, "error", ""),
@@ -161,10 +236,10 @@ class OutreachService:
         for acc in self.active_accounts():
             if self.paused_until.get(acc, now) > now or self.next_send.get(acc, now) > now:
                 continue
-            day = await self.crm.account_day(acc, today)
+            day = await self.crm.account_day(self._slot(acc), today)
             new_ok = day["new_sent"] < await self.daily_limit(acc, now)
             fu_ok = day["followups"] < self.limits.followups_daily
-            for lead in await self.crm.due_leads(now, limit=30, account=acc):
+            for lead in await self.crm.due_leads(now, limit=30, account=self._slot(acc)):
                 is_new = lead["status"] == "new"
                 if (is_new and not new_ok) or (not is_new and not fu_ok):
                     continue
@@ -175,6 +250,7 @@ class OutreachService:
                     sent += 1
                     self.next_send[acc] = now + timedelta(
                         seconds=random.randint(self.limits.min_delay, self.limits.max_delay))
+                    await self._save_state(acc)
                 break  # one attempt per account per tick keeps pacing human-like
         return sent
 
@@ -233,7 +309,7 @@ class OutreachService:
         from telethon.tl.functions.contacts import ImportContactsRequest
         from telethon.tl.types import InputPhoneContact
 
-        await self.crm.bump_account(acc, today, "resolves")
+        await self.crm.bump_account(self._slot(acc), today, "resolves")
         res = await client(ImportContactsRequest([InputPhoneContact(
             client_id=random.randint(1, 2**31), phone=lead["phone"],
             first_name=(lead["company"] or lead["name"] or "Клиент")[:60], last_name="")]))
@@ -254,13 +330,26 @@ class OutreachService:
         if any(k in stopped for k in keys):
             await self.crm.update_lead(lead["id"], status="stopped")
             return False
-        # global dedup across campaigns: don't send twice to same recipient
-        try:
-            if lead["step"] == 0 and keys and await self.crm.is_recipient_contacted(keys):
+        # Global dedup across campaigns. Fail closed: if the check itself breaks we do not send.
+        if lead["step"] == 0:
+            try:
+                dup = bool(keys) and await self.crm.is_recipient_contacted(keys, exclude_lead=lead["id"])
+            except Exception:
+                log.exception("dedup check failed for lead %s - not sending", lead["id"])
+                return False
+            if dup:
                 await self.crm.update_lead(lead["id"], status="failed", note="duplicate recipient across campaigns")
                 return False
-        except Exception:
-            pass
+            if self.external_guard and lead["tg_username"]:
+                try:
+                    elsewhere = await self.external_guard(lead["tg_username"])
+                except Exception:
+                    log.exception("CRM-panel dedup check failed for lead %s - not sending", lead["id"])
+                    return False
+                if elsewhere:
+                    await self.crm.update_lead(lead["id"], status="failed", note="уже писали из CRM-панели")
+                    return False
+        slot = self._slot(acc)
         try:
             if lead["step"] == 0 and campaign["use_demo"] and self.demo_builder and lead["source"] == "maps" \
                     and not lead["demo_url"] and "{demo_url}" in self.template_for(lead, campaign):
@@ -270,12 +359,25 @@ class OutreachService:
                     log.warning("demo build failed for lead %s: %s", lead["id"], exc)
             text = await self.compose(lead, campaign)
             entity = await self._resolve(acc, lead, today)
+            # Second dedup pass on the resolved Telegram id: catches the same person reached
+            # via a phone in one campaign and a @username in another.
+            ent_id = int(getattr(entity, "id", 0) or 0)
+            if lead["step"] == 0 and ent_id:
+                ent_keys = [f"id:{ent_id}"]
+                if any(k in stopped for k in ent_keys):
+                    await self.crm.update_lead(lead["id"], status="stopped", tg_user_id=ent_id)
+                    return False
+                if await self.crm.is_recipient_contacted(ent_keys, exclude_lead=lead["id"]):
+                    await self.crm.update_lead(lead["id"], status="failed", tg_user_id=ent_id,
+                                               note="duplicate recipient across campaigns")
+                    return False
             await self.accounts[acc].client.send_message(entity, text, link_preview=bool(lead["demo_url"]))
         except errors.PeerFloodError:
             self.paused_until[acc] = now + timedelta(hours=24)
+            await self._save_state(acc, reason="PeerFlood")
             # pin lead to this account so tick doesn't retry via another account
             try:
-                await self.crm.update_lead(lead["id"], account=acc, next_at=(now + timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S"))
+                await self.crm.update_lead(lead["id"], account=slot, next_at=(now + timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S"))
             except Exception:
                 pass
             await self._notify(f"⛔ Аккаунт #{acc + 1}: Telegram ограничил первые сообщения (PeerFlood). "
@@ -283,8 +385,9 @@ class OutreachService:
             return False
         except errors.FloodWaitError as exc:
             self.paused_until[acc] = now + timedelta(seconds=exc.seconds + 60)
+            await self._save_state(acc, reason=f"FloodWait {exc.seconds}")
             try:
-                await self.crm.update_lead(lead["id"], account=acc, next_at=(now + timedelta(seconds=exc.seconds + 60)).strftime("%Y-%m-%d %H:%M:%S"))
+                await self.crm.update_lead(lead["id"], account=slot, next_at=(now + timedelta(seconds=exc.seconds + 60)).strftime("%Y-%m-%d %H:%M:%S"))
             except Exception:
                 pass
             await self._notify(f"⏸ Аккаунт #{acc + 1}: FloodWait {exc.seconds} с — пауза.")
@@ -292,7 +395,7 @@ class OutreachService:
         except (errors.UserPrivacyRestrictedError, errors.UserIsBlockedError, errors.InputUserDeactivatedError,
                 errors.UsernameNotOccupiedError, errors.UsernameInvalidError, errors.PeerIdInvalidError,
                 LookupError, ValueError) as exc:
-            await self.crm.update_lead(lead["id"], status="failed", note=str(exc)[:200], account=acc)
+            await self.crm.update_lead(lead["id"], status="failed", note=str(exc)[:200], account=slot)
             return False
         except Exception as exc:
             log.exception("send failed for lead %s", lead["id"])
@@ -309,19 +412,21 @@ class OutreachService:
         step = lead["step"] + 1
         has_next = step <= len(delays)
         await self.crm.update_lead(
-            lead["id"], step=step, status="sent" if has_next else "finished", account=acc,
+            lead["id"], step=step, status="sent" if has_next else "finished", account=slot,
             tg_user_id=getattr(entity, "id", 0) or lead["tg_user_id"], variant=lead["variant"],
             demo_url=lead["demo_url"], next_at=next_time(now, delays[step - 1]) if has_next else "",
         )
         await self.crm.log_message(lead["id"], "out", text)
-        await self.crm.bump_account(acc, today, "new_sent" if lead["step"] == 0 else "followups")
+        await self.crm.bump_account(slot, today, "new_sent" if lead["step"] == 0 else "followups")
         return True
 
     async def send_manual(self, lead_id: int, text: str) -> None:
         lead = await self.crm.get_lead(lead_id)
         if not lead:
             raise LookupError("лид не найден")
-        acc = lead["account"] if lead["account"] >= 0 else (self.active_accounts() or [0])[0]
+        acc = self._index(lead["account"]) if lead["account"] >= 0 else (self.active_accounts() or [0])[0]
+        if acc is None or acc >= len(self.accounts):
+            raise RuntimeError("аккаунт, который вёл этот диалог, сейчас не подключён")
         if not getattr(self.accounts[acc], "enabled", False):
             raise RuntimeError(f"аккаунт #{acc + 1} не подключён")
         client = self.accounts[acc].client
@@ -352,14 +457,13 @@ class OutreachService:
     # ------------------------------------------------------------------
 
     async def handle_incoming(self, acc: int, sender_id: int, text: str) -> tuple[dict, ReplyClass] | None:
-        lead = await self.crm.find_lead_by_tg(sender_id, account=acc) or await self.crm.find_lead_by_tg(sender_id)
+        lead = await self.crm.find_lead_by_tg(sender_id, account=self._slot(acc)) or await self.crm.find_lead_by_tg(sender_id)
         if not lead or not text:
             return None
         # stop chain immediately so tick cannot send follow-up while AI classifies
         await self.crm.log_message(lead["id"], "in", text, label="pending")
-        # deterministic stop without waiting for AI
-        low = (text or "").strip().lower()
-        if any(k in low for k in ("не пишите", "отписк", "stop", "unsubscribe", "не интересно", "не надо")):
+        # deterministic stop without waiting for AI (narrow patterns, see is_explicit_stop)
+        if is_explicit_stop(text):
             await self.crm.update_lead(lead["id"], status="stopped", last_label="stop", next_at="")
             await self.crm.add_stop(stop_keys(lead["tg_username"], sender_id, lead["phone"]), reason="просил не писать")
             cls = ReplyClass(label="stop", hot=0.0, confidence=1.0, backend="rules")

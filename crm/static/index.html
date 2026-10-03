@@ -1719,13 +1719,11 @@ const STATUS_LABELS = {
 
 let current = location.hash.slice(1) || "dash";
 
-// Token & Telegram WebApp Initialization
-const _urlParams = new URLSearchParams(window.location.search);
-const _tokenParam = _urlParams.get("token");
-if (_tokenParam) {
-  localStorage.setItem("crm_token", _tokenParam);
-  const _clean = window.location.pathname + window.location.hash;
-  window.history.replaceState({}, document.title, _clean);
+// Вход только через серверную сессию (httpOnly cookie). Старый токен из
+// localStorage больше не используется - стираем, чтобы он не лежал в браузере.
+try { localStorage.removeItem("crm_token"); } catch (_) {}
+if (new URLSearchParams(window.location.search).has("token")) {
+  window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
 }
 
 if (window.Telegram && window.Telegram.WebApp) {
@@ -1737,17 +1735,14 @@ if (window.Telegram && window.Telegram.WebApp) {
   } catch (_) {}
 }
 
-// API Wrapper with X-CRM-Token and credentials include
+// API: авторизация - только cookie сессии (credentials: "same-origin")
 const api = {
   _headers() {
-    const h = { "Content-Type": "application/json" };
-    const tok = localStorage.getItem("crm_token");
-    if (tok) h["X-CRM-Token"] = tok;
-    return h;
+    return { "Content-Type": "application/json" };
   },
   async get(p) {
     const r = await fetch(p, {
-      credentials: "include",
+      credentials: "same-origin",
       headers: this._headers(),
     });
     if (!r.ok) {
@@ -1759,7 +1754,7 @@ const api = {
   async send(p, body, method = "POST") {
     const r = await fetch(p, {
       method,
-      credentials: "include",
+      credentials: "same-origin",
       headers: this._headers(),
       body: body === undefined ? undefined : JSON.stringify(body)
     });
@@ -1926,6 +1921,7 @@ async function route() {
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           <button class="btn btn-primary" onclick="route()">Повторить попытку</button>
           <button class="btn btn-secondary" onclick="location.href='/auth/logout'">Сбросить сессию</button>
+          <button class="btn btn-secondary" onclick="location.href='/auth/logout?all=1'">Выйти на всех устройствах</button>
         </div>
       </div>`;
   }
@@ -1939,6 +1935,12 @@ async function updateWorkerIndicator() {
     if (!s.enabled) {
       dot.className = "status-dot bad";
       txt.textContent = "Воркер выкл.";
+    } else if (!s.worker_alive) {
+      dot.className = "status-dot bad";
+      txt.textContent = "Воркер не отвечает";
+    } else if (s.blocked_until) {
+      dot.className = "status-dot warn";
+      txt.textContent = "Пауза: " + new Date(s.blocked_until * 1000).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
     } else if (s.dry_run) {
       dot.className = "status-dot warn";
       txt.textContent = "Холостой ход";
