@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sqlite3
+import time
 from contextlib import asynccontextmanager, suppress
 from typing import Any
 
@@ -141,6 +142,22 @@ CREATE TABLE IF NOT EXISTS sequences (
 );
 CREATE INDEX IF NOT EXISTS idx_seq_due ON sequences(status, due_at);
 CREATE INDEX IF NOT EXISTS idx_seq_target ON sequences(target_id);
+
+-- Одноразовые magic-ссылки: nonce записывается при первом входе.
+CREATE TABLE IF NOT EXISTS auth_nonces (
+    nonce       TEXT PRIMARY KEY,
+    used_at     INTEGER NOT NULL
+);
+
+-- Серверные сессии: в базе только sha256 от идентификатора из cookie.
+CREATE TABLE IF NOT EXISTS auth_sessions (
+    sid_hash    TEXT PRIMARY KEY,
+    user_id     INTEGER NOT NULL,
+    created_at  INTEGER NOT NULL,
+    expires_at  INTEGER NOT NULL,
+    revoked     INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
 """
 
 # Настройки по умолчанию. Лимиты взяты не с потолка: свежий аккаунт
@@ -170,7 +187,37 @@ DEFAULT_SETTINGS = {
     "consecutive_floods": "0",      # счётчик флудов подряд (адаптивный throttle)
     "warmup_started_at": "",        # ISO дата первого sent (для warmup)
     "orders_llm_rerank": "0",       # LLM-реранкер заказов (выкл по умолчанию — нужен BAI ключ)
+    # Состояние воркера (пишет сам воркер, переживает рестарт):
+    "blocked_until": "0",           # unix-время: до него отправка на паузе (PeerFlood/FloodWait)
+    "blocked_reason": "",
+    "throttle_cap": "",             # временно сниженный лимит после флудов; daily_cap не трогаем
+    "throttle_until": "0",          # unix-время окончания сниженного лимита
+    "worker_heartbeat": "0",        # unix-время последнего сигнала воркера
 }
+
+THROTTLE_DAYS = 3          # сколько держится сниженный лимит после флуда
+HEARTBEAT_STALE = 120      # воркер «не отвечает», если сигнала нет дольше, сек
+
+
+def _int(value: Any, default: int = 0) -> int:
+    try:
+        return int(str(value).strip() or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def blocked_until(settings: dict[str, str], now: float | None = None) -> int:
+    """Активная пауза отправки (unix-время) или 0."""
+    until = _int(settings.get("blocked_until"))
+    return until if until > (now or time.time()) else 0
+
+
+def throttle_active(settings: dict[str, str], now: float | None = None) -> int | None:
+    """Сниженный после флуда лимит, если он ещё действует."""
+    cap = (settings.get("throttle_cap") or "").strip()
+    if not cap or _int(settings.get("throttle_until")) <= (now or time.time()):
+        return None
+    return max(1, _int(cap, 1))
 
 
 @asynccontextmanager
@@ -251,6 +298,71 @@ async def set_settings(values: dict[str, Any], path: str | None = None) -> None:
 async def log_event(kind: str, text: str, path: str | None = None) -> None:
     async with connect(path) as conn:
         await conn.execute("INSERT INTO events (kind, text) VALUES (?, ?)", (kind, text))
+
+
+# --------------------------------------------------------------------------
+# Авторизация: одноразовые ссылки и серверные сессии
+# --------------------------------------------------------------------------
+
+async def consume_nonce(nonce: str, crm_db: str | None = None) -> bool:
+    """True, если nonce использован впервые. Повторное использование ссылки - False."""
+    now = int(time.time())
+    async with connect(crm_db) as conn:
+        # ссылки живут 15 минут - журнал старше суток не нужен
+        await conn.execute("DELETE FROM auth_nonces WHERE used_at < ?", (now - 86400,))
+        cur = await conn.execute(
+            "INSERT OR IGNORE INTO auth_nonces (nonce, used_at) VALUES (?, ?)", (nonce, now)
+        )
+        return cur.rowcount == 1
+
+
+async def create_session(user_id: int, ttl: int, crm_db: str | None = None) -> str:
+    from crm import auth
+
+    sid = auth.new_session_id()
+    now = int(time.time())
+    async with connect(crm_db) as conn:
+        await conn.execute("DELETE FROM auth_sessions WHERE expires_at < ?", (now,))
+        await conn.execute(
+            "INSERT INTO auth_sessions (sid_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+            (auth.hash_session_id(sid), user_id, now, now + ttl),
+        )
+    return sid
+
+
+async def get_session_user(sid: str, crm_db: str | None = None) -> int | None:
+    if not sid or len(sid) > 128:
+        return None
+    from crm import auth
+
+    async with connect(crm_db) as conn:
+        cur = await conn.execute(
+            "SELECT user_id FROM auth_sessions WHERE sid_hash = ? AND revoked = 0 AND expires_at > ?",
+            (auth.hash_session_id(sid), int(time.time())),
+        )
+        row = await cur.fetchone()
+    return int(row["user_id"]) if row else None
+
+
+async def revoke_session(sid: str, all_for_user: bool = False, crm_db: str | None = None) -> int:
+    """Отзывает сессию (или все сессии её владельца). Возвращает число отозванных."""
+    if not sid:
+        return 0
+    from crm import auth
+
+    h = auth.hash_session_id(sid)
+    async with connect(crm_db) as conn:
+        if all_for_user:
+            cur = await conn.execute(
+                "UPDATE auth_sessions SET revoked = 1 WHERE revoked = 0 AND user_id ="
+                " (SELECT user_id FROM auth_sessions WHERE sid_hash = ?)",
+                (h,),
+            )
+        else:
+            cur = await conn.execute(
+                "UPDATE auth_sessions SET revoked = 1 WHERE sid_hash = ? AND revoked = 0", (h,)
+            )
+        return cur.rowcount
 
 
 # --------------------------------------------------------------------------
@@ -515,38 +627,55 @@ async def queue_message(
 
 
 async def claim_next(
-    owner: str, lease_ms: int = 30_000, crm_db: str | None = None
+    owner: str, lease_ms: int = 600_000, crm_db: str | None = None
 ) -> dict | None:
-    """Atomically claim one queued message; returns claimed row or None."""
+    """Атомарно забирает одно queued-сообщение; возвращает именно его или None.
+
+    Аренда (10 минут) заведомо длиннее любой отправки, включая короткий FloodWait.
+    """
     async with connect(crm_db) as conn:
-        await conn.execute(
-            "UPDATE messages SET status='sending', lease_owner=?,"
-            " lease_until=datetime('now', ?)"
-            " WHERE id=(SELECT id FROM messages WHERE status='queued'"
-            " ORDER BY id LIMIT 1) AND status='queued'",
-            (owner, f"+{lease_ms/1000:.3f} seconds"),
-        )
-        if conn.total_changes == 0:
-            return None
-        # reclaim expired leases (crash recovery)
-        # we just claimed the head; return it
         cur = await conn.execute(
-            "SELECT * FROM messages WHERE lease_owner=? ORDER BY id DESC LIMIT 1", (owner,)
+            "SELECT id FROM messages WHERE status='queued' ORDER BY id LIMIT 1"
         )
+        head = await cur.fetchone()
+        if not head:
+            return None
+        cur = await conn.execute(
+            "UPDATE messages SET status='sending', lease_owner=?,"
+            " lease_until=datetime('now', ?) WHERE id=? AND status='queued'",
+            (owner, f"+{lease_ms/1000:.3f} seconds", head["id"]),
+        )
+        if cur.rowcount != 1:
+            return None  # перехватил другой процесс
+        cur = await conn.execute("SELECT * FROM messages WHERE id=?", (head["id"],))
         row = await cur.fetchone()
-        # verify it is the claimed one (status sending + our owner)
-        if row and row["status"] == "sending":
-            return dict(row)
-        return None
+        return dict(row) if row else None
 
 
 async def release_expired_leases(crm_db: str | None = None) -> int:
+    """Зависшие в `sending` (воркер упал во время отправки) - в failed, а не обратно в очередь.
+
+    Мы не знаем, ушло ли сообщение в Telegram до сбоя. Повтор = риск написать
+    человеку дважды, поэтому такие сообщения ждут ручного решения.
+    """
     async with connect(crm_db) as conn:
         cur = await conn.execute(
-            "UPDATE messages SET status='queued', lease_owner='', lease_until=''"
+            "UPDATE messages SET status='failed', lease_owner='', lease_until='',"
+            " error='результат отправки неизвестен (сбой воркера) - проверьте диалог вручную'"
             " WHERE status='sending' AND lease_until != '' AND lease_until <= datetime('now')"
         )
         return cur.rowcount
+
+
+async def chat_already_sent(chat: str, exclude_id: int = 0, crm_db: str | None = None) -> bool:
+    """Было ли уже доставленное сообщение этому получателю (значит, это не первый контакт)."""
+    u = (chat or "").strip().lstrip("@").lower()
+    async with connect(crm_db) as conn:
+        cur = await conn.execute(
+            "SELECT 1 FROM messages WHERE lower(ltrim(chat, '@')) = ? AND status = 'sent' AND id != ? LIMIT 1",
+            (u, exclude_id),
+        )
+        return await cur.fetchone() is not None
 
 
 async def next_queued(crm_db: str | None = None) -> dict | None:
@@ -619,8 +748,11 @@ async def list_messages(limit: int = 100, crm_db: str | None = None) -> list[dic
 
 
 def effective_daily_cap(settings: dict[str, str]) -> int:
-    """Warmup: первые 14 дней лимит растёт поэтапно. Выкл если warmup_enabled != 1."""
+    """Лимит на сегодня: daily_cap, временно сниженный после флуда, и прогрев первые 14 дней."""
     cap = int(settings.get("daily_cap", "10"))
+    throttled = throttle_active(settings)
+    if throttled is not None:
+        cap = min(cap, throttled)
     if settings.get("warmup_enabled") != "1":
         return cap
     started = (settings.get("warmup_started_at") or "").strip()
@@ -674,6 +806,10 @@ async def summary(crm_db: str | None = None) -> dict:
         "groups_posted": groups_posted,
         "enabled": settings.get("enabled") == "1",
         "dry_run": settings.get("dry_run") == "1",
+        "worker_alive": time.time() - _int(settings.get("worker_heartbeat")) < HEARTBEAT_STALE,
+        "blocked_until": blocked_until(settings),
+        "blocked_reason": settings.get("blocked_reason", "") if blocked_until(settings) else "",
+        "throttle_cap": throttle_active(settings),
     }
 
 
@@ -752,6 +888,13 @@ async def mark_sequence_sent(
             "UPDATE sequences SET status = 'sent', message_id = ? WHERE id = ?",
             (message_id, seq_id),
         )
+
+
+async def set_sequence_status(
+    seq_id: int, status: str, crm_db: str | None = None
+) -> None:
+    async with connect(crm_db) as conn:
+        await conn.execute("UPDATE sequences SET status = ? WHERE id = ?", (status, seq_id))
 
 
 async def mark_sequence_queued(

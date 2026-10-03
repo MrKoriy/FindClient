@@ -72,7 +72,7 @@ HOST = os.environ.get("CRM_HOST", "127.0.0.1")
 PORT = int(os.environ.get("CRM_PORT", "8787"))
 USER = os.environ.get("CRM_USER", "admin")
 PASSWORD = os.environ.get("CRM_PASS", "admin")
-LINK = os.environ.get("CRM_LINK", "https://leonidautomations.ru/demo/")
+LINK = os.environ.get("CRM_LINK", "")
 
 
 from crm import auth
@@ -94,56 +94,93 @@ def _check_basic(header: str | None) -> bool:
     return hmac.compare_digest(got_user, USER) and hmac.compare_digest(got_pass, PASSWORD)
 
 
+def _config_error() -> str:
+    """Причина, по которой панель не должна отдавать данные, или пустая строка."""
+    if not USER or not PASSWORD or (USER == "admin" and PASSWORD == "admin"):
+        return "CRM_USER/CRM_PASS не заданы или дефолтные - панель не поднимется"
+    if len(PASSWORD) < 12:
+        return "CRM_PASS короче 12 символов - задайте длинный пароль"
+    try:
+        auth.get_auth_secret()
+    except auth.AuthConfigError as exc:
+        return str(exc)
+    return ""
+
+
+def _is_https(request: web.Request) -> bool:
+    """HTTPS напрямую или через локальный nginx (X-Forwarded-Proto от 127.0.0.1)."""
+    if request.secure or os.environ.get("CRM_COOKIE_SECURE") == "1":
+        return True
+    peer = request.remote or ""
+    return peer in ("127.0.0.1", "::1") and request.headers.get("X-Forwarded-Proto", "").lower() == "https"
+
+
+def _safe_redirect(target: str | None) -> str:
+    """Только относительный путь этого сайта: никаких //host, /\\host и схем."""
+    from urllib.parse import urlsplit
+
+    if not target or not target.startswith("/") or target.startswith("//") or "\\" in target:
+        return "/"
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in target):
+        return "/"
+    parts = urlsplit(target)
+    if parts.scheme or parts.netloc:
+        return "/"
+    return target
+
+
+def _set_session_cookie(resp: web.StreamResponse, request: web.Request, sid: str) -> None:
+    resp.set_cookie(
+        "crm_session",
+        sid,
+        max_age=auth.SESSION_TTL,
+        httponly=True,
+        secure=_is_https(request),
+        samesite="Lax",
+        path="/",
+    )
+
+
+async def _session_user(request: web.Request) -> int | None:
+    sid = request.cookies.get("crm_session", "")
+    if not sid:
+        return None
+    uid = await crm_db.get_session_user(sid)
+    # владельца могли убрать из OWNER_IDS - его сессии тут же перестают работать
+    return uid if uid is not None and auth.is_owner(uid) else None
+
+
 @web.middleware
 async def auth_middleware(request: web.Request, handler):
-    # CSRF: mutating methods require JSON content-type and (SameSite handles cross-site; check Origin for POST)
+    # CSRF: изменяющие запросы - только JSON и только со своего Origin.
     if request.method in ("POST", "PUT", "DELETE", "PATCH"):
         ctype = request.content_type or ""
-        # allow form posts only to /auth; API must be json
         if not request.path.startswith("/auth") and "application/json" not in ctype:
             return web.json_response({"error": "Content-Type must be application/json"}, status=400)
         origin = request.headers.get("Origin", "")
         if origin and not _origin_allowed(origin, request):
             return web.json_response({"error": "Origin not allowed"}, status=403)
-    if not USER or not PASSWORD or USER == "admin" and PASSWORD == "admin":
-        return web.json_response(
-            {"error": "CRM_USER/CRM_PASS не заданы или дефолтные - панель не поднимется"},
-            status=500,
-        )
 
-    # 1. Пути авторизации по токену и выхода всегда доступны
+    problem = _config_error()
+    if problem:
+        return web.json_response({"error": problem}, status=500)
+
+    # 1. Вход по ссылке и выход доступны без сессии
     if request.path.startswith("/auth"):
         return await handler(request)
 
-    # 2. Проверка сессионной куки crm_session (от входа через Telegram-бота)
-    cookie_token = request.cookies.get("crm_session")
-    if cookie_token and auth.verify_session_cookie(cookie_token) is not None:
-        return await handler(request)
-
-    # 2b. Проверка заголовка X-CRM-Token (для Telegram WebApp и localStorage)
-    hdr_token = request.headers.get("X-CRM-Token")
-    if hdr_token:
-        uid = auth.verify_magic_token(hdr_token) or auth.verify_session_cookie(hdr_token)
-        if uid is not None:
-            return await handler(request)
-
-    # 3. Проверка прямого токена в строке запроса (?token=...)
+    # 2. Старый формат ссылки (/?token=...) - отправляем на /auth, токен одноразовый
     url_token = request.query.get("token")
     if url_token:
-        uid = auth.verify_magic_token(url_token)
-        if uid is not None:
-            resp = await handler(request)
-            resp.set_cookie(
-                "crm_session",
-                auth.create_session_cookie(uid),
-                max_age=auth.SESSION_TTL,
-                httponly=True,
-                samesite="Lax",
-                path="/",
-            )
-            return resp
+        from urllib.parse import urlencode
 
-    # 4. Проверка HTTP Basic Auth (для ручного входа по логину и паролю)
+        raise web.HTTPFound("/auth?" + urlencode({"token": url_token, "redirect": request.path}))
+
+    # 3. Серверная сессия из cookie
+    if await _session_user(request) is not None:
+        return await handler(request)
+
+    # 4. HTTP Basic Auth (ручной вход по логину и паролю)
     if _check_basic(request.headers.get("Authorization")):
         return await handler(request)
 
@@ -154,36 +191,37 @@ async def auth_middleware(request: web.Request, handler):
     )
 
 
+async def _security_headers(request: web.Request, response: web.StreamResponse) -> None:
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    if request.path.startswith(("/api", "/auth")):
+        response.headers["Cache-Control"] = "no-store"
+
+
 async def handle_auth(request: web.Request) -> web.Response:
-    """Обрабатывает одноразовый токен авторизации из Telegram-бота."""
+    """Одноразовая ссылка из Telegram-бота -> серверная сессия."""
     token = request.query.get("token")
     if not token:
         return web.Response(status=400, text="Отсутствует токен авторизации")
 
-    uid = auth.verify_magic_token(token)
+    uid = await auth.consume_magic_token(token)
     if uid is None:
-        return web.Response(status=403, text="Недействительный или истекший токен авторизации")
+        return web.Response(
+            status=403,
+            text="Ссылка недействительна, истекла или уже использована. Запросите новую командой /crm в боте.",
+        )
 
-    target = request.query.get("redirect", "/")
-    if not target.startswith("/") or target.startswith("//"):
-        target = "/"
-
-    resp = web.HTTPFound(target)
-    is_https = request.url.scheme == "https"
-    resp.set_cookie(
-        "crm_session",
-        auth.create_session_cookie(uid),
-        max_age=auth.SESSION_TTL,
-        httponly=True,
-        secure=is_https,
-        samesite="Lax",
-        path="/",
-    )
+    sid = await crm_db.create_session(uid, auth.SESSION_TTL)
+    resp = web.HTTPFound(_safe_redirect(request.query.get("redirect", "/")))
+    _set_session_cookie(resp, request, sid)
     raise resp
 
 
 async def handle_logout(request: web.Request) -> web.Response:
-    """Сбрасывает сессионную куку авторизации."""
+    """Отзывает сессию на сервере (?all=1 - все сессии владельца) и стирает cookie."""
+    sid = request.cookies.get("crm_session", "")
+    if sid:
+        await crm_db.revoke_session(sid, all_for_user=request.query.get("all") == "1")
     resp = web.HTTPFound("/")
     resp.del_cookie("crm_session", path="/")
     raise resp
@@ -671,6 +709,7 @@ async def index(request: web.Request) -> web.Response:
 
 def create_app() -> web.Application:
     app = web.Application(middlewares=[auth_middleware])
+    app.on_response_prepare.append(_security_headers)
     app.add_routes([
         web.get("/", index),
         web.get("/auth", handle_auth),
@@ -718,8 +757,9 @@ async def main() -> None:
     )
     await crm_db.init_db()
     await seed_templates()
-    if not USER or not PASSWORD:
-        log.error("CRM_USER и CRM_PASS не заданы - панель не будет отдавать данные")
+    problem = _config_error()
+    if problem:
+        raise SystemExit(f"CRM не запущена: {problem}")
     log.info("CRM на http://%s:%s", HOST, PORT)
     runner = web.AppRunner(create_app(), access_log=None)
     await runner.setup()

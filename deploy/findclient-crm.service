@@ -6,6 +6,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+# Не root: выделенный пользователь (deploy/ensure_user.sh)
+User=findclient
+Group=findclient
 WorkingDirectory=/opt/2gi_scraper
 EnvironmentFile=/opt/2gi_scraper/crm.env
 ExecStart=/opt/2gi_scraper/venv/bin/python -m crm.app
@@ -17,7 +20,14 @@ StandardError=journal
 # Панель держит историю переписки и список клиентов — лишние права ей ни к чему.
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=full
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/2gi_scraper
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
 
 [Install]
 WantedBy=multi-user.target

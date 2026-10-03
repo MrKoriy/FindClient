@@ -1,0 +1,12 @@
+# gitleaks: стандартные правила + исключения для заведомо тестовых значений.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "test fixtures and documented public placeholders"
+paths = ['''^tests/''', '''^AUDIT-.*\.md$''']
+regexes = [
+  '''findclient-fallback-secret-key-2026''',
+  '''test-secret-key-for-pytest-only''',
+  '''your_telegram_bot_token_here''',
+]

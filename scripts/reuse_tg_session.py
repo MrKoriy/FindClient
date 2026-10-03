@@ -21,7 +21,7 @@ API_HASH = os.environ.get("TG_API_HASH", "")
 if not API_ID or not API_HASH:
     raise SystemExit("нужны TG_API_ID и TG_API_HASH в окружении")
 
-SRC = sys.argv[1] if len(sys.argv) > 1 else "/root/.hermes/telethon_vibecoders"
+SRC = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("TG_SESSION_FILE", ".sessions/crm_sender")
 ENV = sys.argv[2] if len(sys.argv) > 2 else ".env"
 
 

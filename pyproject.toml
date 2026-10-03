@@ -1,3 +1,9 @@
+[project]
+name = "findclient"
+version = "0.2.0"
+description = "Telegram bot + CRM: leads from maps and Telegram, freelance orders, outreach"
+requires-python = ">=3.12"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

@@ -6,6 +6,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+# Не root: выделенный пользователь (deploy/ensure_user.sh)
+User=findclient
+Group=findclient
 WorkingDirectory=/opt/2gi_scraper
 
 # .env lives next to the code and is the single source of configuration.
@@ -24,9 +27,14 @@ KillSignal=SIGINT
 
 NoNewPrivileges=yes
 PrivateTmp=yes
-ProtectSystem=full
+ProtectSystem=strict
 ProtectHome=yes
 ReadWritePaths=/opt/2gi_scraper
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
 
 StandardOutput=journal
 StandardError=journal

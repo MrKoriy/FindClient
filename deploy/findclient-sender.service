@@ -6,6 +6,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+# Не root: выделенный пользователь (deploy/ensure_user.sh)
+User=findclient
+Group=findclient
 WorkingDirectory=/opt/2gi_scraper
 EnvironmentFile=/opt/2gi_scraper/crm.env
 ExecStart=/opt/2gi_scraper/venv/bin/python -m crm.sender
@@ -17,11 +20,18 @@ StandardError=journal
 # Отправку можно и нужно останавливать одной командой, не трогая панель:
 #   systemctl stop findclient-sender
 #
-# ProtectHome здесь НЕ ставим: Telethon держит файл сессии в /root/.hermes
-# и должен иметь право его перезаписывать. С read-only сессия не сохранится.
+# Файл Telethon-сессии лежит в /opt/2gi_scraper/.sessions (ensure_user.sh
+# переносит его из /root) - запись туда разрешена ReadWritePaths.
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=full
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/2gi_scraper
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
 
 [Install]
 WantedBy=multi-user.target

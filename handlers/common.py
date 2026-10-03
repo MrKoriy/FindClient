@@ -62,7 +62,12 @@ BACK_TO_MENU = [("⬅️ Меню", "menu:home")]
 
 
 class AccessMiddleware(BaseMiddleware):
-    """Personal tool: only OWNER_IDS may use the bot (if the list is configured)."""
+    """Personal tool: only OWNER_IDS may use the bot.
+
+    Fail-closed: with an empty OWNER_IDS nobody gets in (the bot only tells the
+    user their Telegram ID so they can put it into .env). Otherwise anyone who
+    found the bot could open the CRM and send messages from the owner's accounts.
+    """
 
     def __init__(self, owner_ids: frozenset[int]) -> None:
         self.owner_ids = owner_ids
@@ -74,7 +79,7 @@ class AccessMiddleware(BaseMiddleware):
         data: dict[str, Any],
     ) -> Any:
         user = data.get("event_from_user")
-        if not self.owner_ids or (user and user.id in self.owner_ids):
+        if self.owner_ids and user and user.id in self.owner_ids:
             return await handler(event, data)
         text = f"⛔ Доступ закрыт. Ваш Telegram ID: {user.id if user else '?'} - добавьте его в OWNER_IDS."
         if isinstance(event, Message):

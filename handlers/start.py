@@ -39,14 +39,22 @@ HELP = (
 
 
 def make_crm_auth_view(user_id: int, crm_url: str) -> tuple[str, InlineKeyboardMarkup]:
-    token = crm_auth.generate_magic_token(user_id)
+    home = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Главное меню", callback_data="menu:home")]]
+    )
+    if not crm_url.startswith("https://"):
+        return ("CRM-панель не настроена: укажите <code>CRM_URL=https://...</code> в .env бота.", home)
+    try:
+        token = crm_auth.generate_magic_token(user_id)
+    except crm_auth.AuthConfigError:
+        return ("CRM-панель не настроена: задайте <code>CRM_SECRET_KEY</code> (одинаковый в .env и crm.env).", home)
     login_url = f"{crm_url.rstrip('/')}/auth?token={token}"
 
     text = (
         "<b>Панель FindClient CRM</b>\n\n"
-        "Одноразовая ссылка для мгновенной авторизации создана.\n"
-        "Срок действия ссылки: 15 минут.\n"
-        "После первого перехода авторизация в браузере сохраняется на 30 дней."
+        "Одноразовая ссылка для входа создана.\n"
+        "Срок действия: 15 минут, сработает только один раз.\n"
+        "Сессия в браузере живёт 7 дней; «Выйти на всех устройствах» в настройках панели отзывает её."
     )
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [

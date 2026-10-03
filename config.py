@@ -38,7 +38,8 @@ class Settings:
     HTTP_PROXY_POOL: str = ""
     YANDEX_PROXY_POOL: str = ""
     # База CRM-панели для кнопки /crm: куда вести юзера за одноразовым токеном.
-    CRM_URL: str = "https://94-103-1-126.sslip.io:9444"
+    # Пусто = кнопка CRM сообщает, что панель не настроена.
+    CRM_URL: str = ""
     ORDERS_LLM_RERANK: bool = False
     # Extra Telegram accounts for outreach (TG_SESSION_2, TG_SESSION_3, ...).
     TG_EXTRA_SESSIONS: tuple[str, ...] = ()
@@ -97,7 +98,7 @@ class Settings:
             HTTP_PROXY=env("HTTP_PROXY", "").strip(),
             HTTP_PROXY_POOL=env("HTTP_PROXY_POOL", "").strip(),
             YANDEX_PROXY_POOL=env("YANDEX_PROXY_POOL", "").strip(),
-            CRM_URL=env("CRM_URL", "").strip() or "https://94-103-1-126.sslip.io:9444",
+            CRM_URL=env("CRM_URL", "").strip(),
             ORDERS_LLM_RERANK=env("ORDERS_LLM_RERANK", "").strip() in ("1", "true", "True"),
             TG_EXTRA_SESSIONS=tuple(
                 v.strip()

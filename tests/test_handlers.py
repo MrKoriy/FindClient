@@ -4,6 +4,7 @@
 конфликт роутов и регрессии хелперов, которые видит юзер.
 """
 
+import pytest
 from aiogram import Dispatcher
 
 import handlers
@@ -53,6 +54,36 @@ def test_kb_and_document():
     assert doc.filename == "файл.xlsx"
 
 
-def test_settings_crm_url_default():
+def test_settings_crm_url_default_is_empty():
+    # адрес сервера не зашит в код - только из .env
     s = Settings(BOT_TOKEN="t")
-    assert s.CRM_URL.startswith("https://")
+    assert s.CRM_URL == ""
+
+
+def test_make_crm_auth_view_without_url_or_secret(monkeypatch):
+    text, markup = make_crm_auth_view(1, "")
+    assert "не настроена" in text and "CRM_URL" in text
+    monkeypatch.setenv("CRM_SECRET_KEY", "")
+    text, _ = make_crm_auth_view(1, "https://crm.example/")
+    assert "CRM_SECRET_KEY" in text
+
+
+@pytest.mark.asyncio
+async def test_access_middleware_fail_closed():
+    from types import SimpleNamespace
+
+    from handlers.common import AccessMiddleware
+
+    calls = []
+
+    async def handler(event, data):
+        calls.append(event)
+        return "ok"
+
+    stranger = {"event_from_user": SimpleNamespace(id=5)}
+    owner = {"event_from_user": SimpleNamespace(id=1)}
+    # пустой OWNER_IDS: не пускаем никого
+    assert await AccessMiddleware(frozenset())(handler, object(), owner) is None
+    assert await AccessMiddleware(frozenset({1}))(handler, object(), stranger) is None
+    assert await AccessMiddleware(frozenset({1}))(handler, object(), owner) == "ok"
+    assert len(calls) == 1

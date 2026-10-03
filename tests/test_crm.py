@@ -501,13 +501,13 @@ async def test_offer_api_endpoints(crm_path, scraper_path, monkeypatch):
     from crm import app as crm_app
 
     monkeypatch.setattr(crm_app, "USER", "admin")
-    monkeypatch.setattr(crm_app, "PASSWORD", "secret")
+    monkeypatch.setattr(crm_app, "PASSWORD", "correct-horse-battery")
     monkeypatch.setattr(crm_db, "DEFAULT_CRM_DB", crm_path)
     await crm_db.import_targets(scraper_path, crm_path)
 
     async def _run():
         app = crm_app.create_app()
-        auth = base64.b64encode(b"admin:secret").decode("utf-8")
+        auth = base64.b64encode(b"admin:correct-horse-battery").decode("utf-8")
         headers = {"Authorization": f"Basic {auth}"}
 
         async with TestClient(TestServer(app), headers=headers) as client:
@@ -568,25 +568,38 @@ def test_bai_clean_human_output():
     assert not cleaned.endswith('»')
     assert "сайты - быстро" in cleaned
 
-def test_magic_token_and_session_cookie():
+def test_magic_token_signature_and_owner():
     from crm import auth
 
-    secret = "test-secret-key-12345"
+    secret = "x" * 40
     uid = 1432816193
 
     token = auth.generate_magic_token(uid, secret=secret)
-    assert token
     assert auth.verify_magic_token(token, secret=secret) == uid
-
-    # Invalid token or wrong secret
-    assert auth.verify_magic_token(token, secret="wrong-secret") is None
+    assert auth.verify_magic_token(token, secret="y" * 40) is None
     assert auth.verify_magic_token("corrupted.token", secret=secret) is None
+    # не владелец - даже с валидной подписью
+    assert auth.verify_magic_token(auth.generate_magic_token(777, secret=secret), secret=secret) is None
 
-    # Session cookie
-    cookie = auth.create_session_cookie(uid, secret=secret)
-    assert cookie
-    assert auth.verify_session_cookie(cookie, secret=secret) == uid
-    assert auth.verify_session_cookie(cookie, secret="wrong-secret") is None
+
+def test_auth_secret_fail_closed(monkeypatch):
+    from crm import auth
+
+    for bad in ("", "short", "findclient-fallback-secret-key-2026"):
+        monkeypatch.setenv("CRM_SECRET_KEY", bad)
+        monkeypatch.setenv("CRM_PASS", "p" * 40)
+        monkeypatch.setenv("BOT_TOKEN", "123:" + "b" * 40)
+        monkeypatch.setenv("CI", "true")
+        with pytest.raises(auth.AuthConfigError):
+            auth.get_auth_secret()
+
+
+def test_empty_owner_ids_rejects_everyone(monkeypatch):
+    from crm import auth
+
+    monkeypatch.setenv("OWNER_IDS", "")
+    token = auth.generate_magic_token(1432816193)
+    assert auth.verify_magic_token(token) is None
 
 
 @pytest.mark.asyncio
@@ -598,47 +611,122 @@ async def test_crm_auth_flow(crm_path, monkeypatch):
     from crm import auth
 
     monkeypatch.setattr(crm_app, "USER", "admin")
-    monkeypatch.setattr(crm_app, "PASSWORD", "secret")
+    monkeypatch.setattr(crm_app, "PASSWORD", "correct-horse-battery")
     monkeypatch.setattr(crm_db, "DEFAULT_CRM_DB", crm_path)
 
-    async def _run():
-        app = crm_app.create_app()
-        async with TestClient(TestServer(app)) as client:
-            # 1. Without auth -> 401
+    app = crm_app.create_app()
+    async with TestClient(TestServer(app)) as client:
+        # 1. Без авторизации -> 401
+        r = await client.get("/")
+        assert r.status == 401
+
+        # 2. /auth с magic-токеном -> 302 и cookie
+        token = auth.generate_magic_token(1432816193)
+        r = await client.get(f"/auth?token={token}", allow_redirects=False)
+        assert r.status == 302
+        assert "crm_session" in client.session.cookie_jar.filter_cookies(client.make_url("/"))
+        assert r.headers["Cache-Control"] == "no-store"
+
+        # 3. С cookie -> 200
+        r = await client.get("/api/summary")
+        assert r.status == 200
+        assert "targets" in await r.json()
+
+        # 4. Повтор той же ссылки не пускает
+        client.session.cookie_jar.clear()
+        r = await client.get(f"/auth?token={token}", allow_redirects=False)
+        assert r.status == 403
+
+        # 5. Старый формат /?token= перенаправляется на /auth и тоже одноразовый
+        token2 = auth.generate_magic_token(1432816193)
+        r = await client.get(f"/?token={token2}", allow_redirects=False)
+        assert r.status == 302 and r.headers["Location"].startswith("/auth?")
+        r = await client.get(f"/?token={token2}")
+        assert r.status == 200
+        client.session.cookie_jar.clear()
+        r = await client.get(f"/auth?token={token2}", allow_redirects=False)
+        assert r.status == 403
+
+        # 6. X-CRM-Token больше не принимается
+        token3 = auth.generate_magic_token(1432816193)
+        r = await client.get("/api/summary", headers={"X-CRM-Token": token3})
+        assert r.status == 401
+
+        # 7. Logout отзывает сессию на сервере: украденная cookie больше не работает
+        r = await client.get(f"/auth?token={token3}", allow_redirects=False)
+        assert r.status == 302
+        sid = client.session.cookie_jar.filter_cookies(client.make_url("/"))["crm_session"].value
+        r = await client.get("/auth/logout", allow_redirects=False)
+        assert r.status == 302
+        client.session.cookie_jar.clear()
+        r = await client.get("/api/summary", cookies={"crm_session": sid})
+        assert r.status == 401
+
+
+@pytest.mark.asyncio
+async def test_logout_all_revokes_every_session(crm_path, monkeypatch):
+    monkeypatch.setattr(crm_db, "DEFAULT_CRM_DB", crm_path)
+    await crm_db.init_db(crm_path)
+    a = await crm_db.create_session(1432816193, 3600, crm_db=crm_path)
+    b = await crm_db.create_session(1432816193, 3600, crm_db=crm_path)
+    other = await crm_db.create_session(42, 3600, crm_db=crm_path)
+    assert await crm_db.revoke_session(a, all_for_user=True, crm_db=crm_path) == 2
+    assert await crm_db.get_session_user(b, crm_db=crm_path) is None
+    assert await crm_db.get_session_user(other, crm_db=crm_path) == 42
+
+
+@pytest.mark.asyncio
+async def test_expired_session_rejected(crm_path):
+    await crm_db.init_db(crm_path)
+    sid = await crm_db.create_session(1432816193, -1, crm_db=crm_path)
+    assert await crm_db.get_session_user(sid, crm_db=crm_path) is None
+
+
+@pytest.mark.parametrize("target,expected", [
+    ("/", "/"), ("/#targets", "/#targets"), ("/api/summary", "/api/summary"),
+    ("//evil.com", "/"), ("/\\evil.com", "/"), ("https://evil.com", "/"),
+    ("/\tevil", "/"), ("", "/"), ("evil.com", "/"),
+])
+def test_safe_redirect(target, expected):
+    from crm import app as crm_app
+
+    assert crm_app._safe_redirect(target) == expected
+
+
+@pytest.mark.asyncio
+async def test_cookie_secure_behind_https_proxy(crm_path, monkeypatch):
+    from aiohttp.test_utils import TestClient, TestServer
+
+    from crm import app as crm_app
+    from crm import auth
+
+    monkeypatch.setattr(crm_app, "USER", "admin")
+    monkeypatch.setattr(crm_app, "PASSWORD", "correct-horse-battery")
+    monkeypatch.setattr(crm_db, "DEFAULT_CRM_DB", crm_path)
+    async with TestClient(TestServer(crm_app.create_app())) as client:
+        token = auth.generate_magic_token(1432816193)
+        r = await client.get(f"/auth?token={token}", allow_redirects=False,
+                             headers={"X-Forwarded-Proto": "https"})
+        assert r.status == 302
+        assert "Secure" in r.headers["Set-Cookie"]
+        assert "HttpOnly" in r.headers["Set-Cookie"]
+
+
+@pytest.mark.asyncio
+async def test_panel_refuses_weak_config(crm_path, monkeypatch):
+    from aiohttp.test_utils import TestClient, TestServer
+
+    from crm import app as crm_app
+
+    monkeypatch.setattr(crm_db, "DEFAULT_CRM_DB", crm_path)
+    for user, pwd, secret in (("admin", "admin", "s" * 40), ("owner", "short", "s" * 40),
+                              ("owner", "correct-horse-battery", "")):
+        monkeypatch.setattr(crm_app, "USER", user)
+        monkeypatch.setattr(crm_app, "PASSWORD", pwd)
+        monkeypatch.setenv("CRM_SECRET_KEY", secret)
+        async with TestClient(TestServer(crm_app.create_app())) as client:
             r = await client.get("/")
-            assert r.status == 401
-
-            # 2. Via /auth with magic token -> 302 Found and cookie set
-            token = auth.generate_magic_token(1432816193)
-            r = await client.get(f"/auth?token={token}", allow_redirects=False)
-            assert r.status == 302
-            assert "crm_session" in client.session.cookie_jar.filter_cookies(client.make_url("/"))
-
-            # 3. Subsequent request with session cookie -> 200 OK
-            r = await client.get("/api/summary")
-            assert r.status == 200
-            data = await r.json()
-            assert "targets" in data
-
-            # 4. Direct request with ?token=... param -> 200 OK
-            client.session.cookie_jar.clear()
-            token2 = auth.generate_magic_token(1432816193)
-            r = await client.get(f"/?token={token2}")
-            assert r.status == 200
-
-            # 5. Request with X-CRM-Token header -> 200 OK
-            client.session.cookie_jar.clear()
-            token3 = auth.generate_magic_token(1432816193)
-            r = await client.get("/api/summary", headers={"X-CRM-Token": token3})
-            assert r.status == 200
-
-            # 6. Logout
-            r = await client.get("/auth/logout", allow_redirects=False)
-            assert r.status == 302
-
-    await _run()
-
-
+            assert r.status == 500
 
 
 @pytest.mark.asyncio
@@ -657,7 +745,7 @@ async def test_panel_responsive_during_slow_ai_call(crm_path, monkeypatch):
     from crm import offer as offer_mod
 
     monkeypatch.setattr(crm_app, "USER", "admin")
-    monkeypatch.setattr(crm_app, "PASSWORD", "secret")
+    monkeypatch.setattr(crm_app, "PASSWORD", "correct-horse-battery")
     monkeypatch.setattr(crm_db, "DEFAULT_CRM_DB", crm_path)
 
     started = asyncio.Event()
@@ -670,7 +758,7 @@ async def test_panel_responsive_during_slow_ai_call(crm_path, monkeypatch):
 
     monkeypatch.setattr(offer_mod, "auto_improve_offer", slow_improve)
 
-    auth = base64.b64encode(b"admin:secret").decode("utf-8")
+    auth = base64.b64encode(b"admin:correct-horse-battery").decode("utf-8")
     headers = {"Authorization": f"Basic {auth}"}
 
     app = crm_app.create_app()
@@ -697,10 +785,10 @@ async def test_non_numeric_params_return_400_not_500(crm_path, monkeypatch):
     from crm import app as crm_app
 
     monkeypatch.setattr(crm_app, "USER", "admin")
-    monkeypatch.setattr(crm_app, "PASSWORD", "secret")
+    monkeypatch.setattr(crm_app, "PASSWORD", "correct-horse-battery")
     monkeypatch.setattr(crm_db, "DEFAULT_CRM_DB", crm_path)
 
-    auth = base64.b64encode(b"admin:secret").decode("utf-8")
+    auth = base64.b64encode(b"admin:correct-horse-battery").decode("utf-8")
     headers = {"Authorization": f"Basic {auth}"}
     app = crm_app.create_app()
     async with TestClient(TestServer(app), headers=headers) as client:

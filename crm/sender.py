@@ -40,18 +40,18 @@ log = logging.getLogger("crm.sender")
 
 SESSION = os.environ.get(
     "CRM_TELETHON_SESSION",
-    os.environ.get("TG_SESSION_FILE", str(Path.home() / ".hermes" / "telethon_vibecoders")),
+    os.environ.get("TG_SESSION_FILE", str(Path(__file__).resolve().parent.parent / ".sessions" / "crm_sender")),
 )
 API_ID = int(os.environ.get("TG_API_ID", "0"))
 API_HASH = os.environ.get("TG_API_HASH", "")
 
-# Сколько ждать, если Телеграм попросил подождать больше суток: смысла спать
-# столько в процессе нет, лучше честно выйти и дать systemd перезапустить.
-MAX_INLINE_WAIT = 3600
+# Короткий FloodWait отрабатываем сном прямо в процессе (аренда сообщения - 10
+# минут, с запасом). Длинный - пауза аккаунта в базе (`blocked_until`): воркер
+# не трогает очередь до её окончания, даже после рестарта.
+MAX_INLINE_WAIT = 60
 POLL_EMPTY = 30
-# Пауза перед повтором после долгого FloodWait: лимит снимется не скоро,
-# но и в пустую молотить каждые 30 секунд незачем.
-FLOOD_RETRY_PAUSE = 300
+PEER_FLOOD_PAUSE = 24 * 3600
+HEARTBEAT_EVERY = 30
 
 
 def _load_env() -> None:
@@ -96,30 +96,72 @@ def make_client():
 
 
 async def _adaptive_throttle(crm_path: str | None, wait: int = 0, peer_flood: bool = False) -> None:
-    """Снижает daily_cap и увеличивает cooldown при флуд-ошибках — никогда не повышает."""
+    """Временно снижает лимит и увеличивает cooldown после флуда - никогда не повышает.
+
+    Базовый `daily_cap` из настроек не перезаписывается: сниженный лимит хранится
+    отдельно (`throttle_cap`) и сам истекает через THROTTLE_DAYS дней.
+    """
+    import time as _time
+
     settings = await crm_db.get_settings(crm_path)
-    cap = int(settings.get("daily_cap", "10"))
+    base = int(settings.get("daily_cap", "10"))
+    cap = crm_db.throttle_active(settings) or base
     cooldown = int(settings.get("cooldown_seconds", "1200"))
     consecutive = int(settings.get("consecutive_floods", "0")) + 1
     factor = 0.5 if consecutive >= 3 else 0.6
-    new_cap = min(cap, int(cap * factor))
-    new_cap = max(1, new_cap)
+    new_cap = max(1, min(cap, int(cap * factor)))
     new_cooldown = min(3600, int(cooldown * 1.5))
     await crm_db.set_settings(
-        {"daily_cap": str(new_cap), "cooldown_seconds": str(new_cooldown),
+        {"throttle_cap": str(new_cap),
+         "throttle_until": str(int(_time.time()) + crm_db.THROTTLE_DAYS * 86400),
+         "cooldown_seconds": str(new_cooldown),
          "consecutive_floods": str(consecutive)},
         crm_path,
     )
     reason = "PeerFlood" if peer_flood else f"FloodWait {wait}с"
+    msg = (f"{reason}: лимит {cap}->{new_cap} на {crm_db.THROTTLE_DAYS} дн. (базовый {base}), "
+           f"cooldown {cooldown}->{new_cooldown}, n={consecutive}")
     try:
-        msg = f"{reason}: cap {cap}->{new_cap}, cooldown {cooldown}->{new_cooldown}, n={consecutive}"  # noqa: E501
         await crm_db.log_event("flood", msg, crm_path)
     except Exception:
         pass
-    log.warning(
-        "adaptive throttle: %s cap %s->%s cooldown %s->%s floods=%s",  # noqa: E501
-        reason, cap, new_cap, cooldown, new_cooldown, consecutive,
-    )
+    log.warning("adaptive throttle: %s", msg)
+
+
+async def _block(crm_path: str | None, seconds: int, reason: str) -> None:
+    """Пауза отправки, сохранённая в базе - переживает рестарт воркера."""
+    import time as _time
+
+    until = int(_time.time()) + int(seconds)
+    settings = await crm_db.get_settings(crm_path)
+    if crm_db.blocked_until(settings) >= until:
+        return
+    await crm_db.set_settings({"blocked_until": str(until), "blocked_reason": reason}, crm_path)
+    try:
+        await crm_db.log_event("pause", f"{reason}: пауза до {datetime.fromtimestamp(until, UTC):%Y-%m-%d %H:%M} UTC",
+                               crm_path)
+    except Exception:
+        pass
+    log.warning("отправка на паузе %s с: %s", seconds, reason)
+
+
+async def heartbeat(crm_path: str | None = None) -> None:
+    import time as _time
+
+    await crm_db.set_settings({"worker_heartbeat": str(int(_time.time()))}, crm_path)
+
+
+async def _sleep(seconds: float, crm_path: str | None = None) -> None:
+    """Сон с сигналами жизни: панель видит, что воркер работает, а не завис."""
+    left = max(0.0, float(seconds))
+    while left > 0:
+        chunk = min(HEARTBEAT_EVERY, left)
+        await asyncio.sleep(chunk)
+        left -= chunk
+        try:
+            await heartbeat(crm_path)
+        except Exception:
+            pass
 
 
 async def _reset_floods_on_success(crm_path: str | None) -> None:
@@ -168,10 +210,12 @@ async def send_one(client, message: dict, settings: dict, crm_path: str | None =
             if wait > 300:
                 await _adaptive_throttle(crm_path, wait=wait)
             if wait > MAX_INLINE_WAIT or attempt == 1:
+                await _block(crm_path, wait + 60, f"FloodWait {wait} с")
                 return "queued", f"FloodWait {wait} с", None
             await asyncio.sleep(wait + 5)
         except PeerFloodError:
             await _adaptive_throttle(crm_path, peer_flood=True)
+            await _block(crm_path, PEER_FLOOD_PAUSE, "PeerFlood: аккаунт ограничен для сообщений незнакомым")
             return "failed", "PEER_FLOOD: аккаунт ограничен для сообщений незнакомым", None
         except UserPrivacyRestrictedError:
             return "failed", "приватность получателя запрещает сообщения", None
@@ -186,8 +230,15 @@ async def run_once(client, crm_path: str | None = None) -> bool:
     `crm_path` протянут параметром, а не берётся из окружения: иначе воркер
     нельзя ни протестировать на временной базе, ни запустить на другой.
     """
+    await heartbeat(crm_path)
     settings = await crm_db.get_settings(crm_path)
     if settings.get("enabled") != "1":
+        return False
+
+    paused = crm_db.blocked_until(settings)
+    if paused:
+        log.info("отправка на паузе до %s UTC (%s)",
+                 datetime.fromtimestamp(paused, UTC).strftime("%Y-%m-%d %H:%M"), settings.get("blocked_reason", ""))
         return False
 
     if not in_work_hours(settings):
@@ -218,6 +269,10 @@ async def run_once(client, crm_path: str | None = None) -> bool:
                 continue
             chat = (target.get("username") or "").strip()
             if not chat:
+                # без получателя шаг не отправить никогда - не держим его в pending вечно
+                await crm_db.set_sequence_status(seq["id"], "cancelled", crm_db=crm_path)
+                await crm_db.log_event("drip", f"шаг {seq['id']} отменён: у цели {target['id']} нет username",
+                                       crm_path)
                 continue
             mid = await crm_db.queue_message(seq["target_id"], chat, seq["body"], crm_db=crm_path)
             await crm_db.mark_sequence_queued(seq["id"], mid, crm_db=crm_path)
@@ -235,18 +290,31 @@ async def run_once(client, crm_path: str | None = None) -> bool:
             await crm_db.mark_message(message["id"], "skipped", "target blocked/replied", None, crm_db=crm_path)
             return True
 
+    # Общий дедуп с рассылками бота: первый контакт только если бот этому человеку не писал.
+    if message.get("kind", "dm") == "dm" and settings.get("dry_run") != "1" \
+            and not await crm_db.chat_already_sent(message["chat"], message["id"], crm_db=crm_path):
+        from services.recipient_guard import contacted_by_bot
+
+        try:
+            elsewhere = await contacted_by_bot(message["chat"], crm_db.DEFAULT_SCRAPER_DB)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("проверка дублей с ботом не удалась (%s) - сообщение остаётся в очереди", exc)
+            await crm_db.mark_message(message["id"], "queued", "", None, crm_db=crm_path)
+            return False
+        if elsewhere:
+            await crm_db.mark_message(message["id"], "skipped", "уже писали из бота или он в стоп-листе бота",
+                                      None, crm_db=crm_path)
+            return True
+
     log.info("отправляю @%s (%s/%s за сегодня)", message["chat"], today + 1, cap)
     status, error, tg_id = await send_one(client, message, settings, crm_path)
     if status == "queued":
-        # Долгий FloodWait: release lease so it retries after backoff
+        # Долгий FloodWait: сообщение возвращается в очередь, пауза уже в базе
+        # (blocked_until) - следующий run_once ничего не отправит до её конца.
         await crm_db.mark_message(message["id"], "queued", error, None, crm_db=crm_path)
-        await asyncio.sleep(min(FLOOD_RETRY_PAUSE, 300))
         return True
-    if status == "failed" and "PEER_FLOOD" in error:
-        # persist block: treat as hard stop, long cooldown, no retry this tick
-        await crm_db.set_settings({"blocked_until": str(int(__import__("time").time()) + 24*3600)}, crm_path)
+    if status == "failed" and "PEER_FLOOD" in (error or ""):
         await crm_db.mark_message(message["id"], "failed", error, None, crm_db=crm_path)
-        await asyncio.sleep(FLOOD_RETRY_PAUSE)
         return True
     await crm_db.mark_message(message["id"], status, error, tg_id, crm_db=crm_path)
     log.info("  -> %s %s", status, error)
@@ -262,7 +330,7 @@ async def run_once(client, crm_path: str | None = None) -> bool:
             low = int(settings.get("min_delay", "90"))
             high = max(low, int(settings.get("max_delay", "240")))
             pause = random.randint(low, high)
-        await asyncio.sleep(pause)
+        await _sleep(pause, crm_path)
     return True
 
 
@@ -283,7 +351,7 @@ async def main() -> None:
         while True:
             worked = await run_once(client)
             if not worked:
-                await asyncio.sleep(POLL_EMPTY)
+                await _sleep(POLL_EMPTY)
     finally:
         await client.disconnect()
 
