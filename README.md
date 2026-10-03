@@ -124,4 +124,5 @@ sudo CRM_HOSTNAME=crm.example.com bash deploy/install_crm.sh # CRM-панель 
 он же переносит Telethon-сессию воркера из `/root` в `.sessions/`). Адреса сервера в репозиторий
 не коммитятся: `CRM_URL`, `CRM_HOSTNAME`, `DEMO_BASE_URL` задаются только в `.env` / `crm.env`.
 
-CI (`.github/workflows/ci.yml`) на каждый PR гоняет ruff, тесты с покрытием, `pip-audit` и gitleaks.
+CI-конфиг лежит в `docs/github-ci.yml` (ruff, тесты с покрытием, `pip-audit`, gitleaks). Чтобы включить,
+скопируйте его в `.github/workflows/ci.yml` через веб-интерфейс GitHub или токеном с правом `workflow`.
